@@ -1378,20 +1378,49 @@ function toggleMobileSidebar() {
 function initReviewJump() {
   const review = byId("review");
   const button = byId("reviewJump");
+  const lastStep = review.querySelector(".review-list > li:last-child");
   const updateDirection = () => {
     const reachedReview = window.scrollY + 80 >= review.offsetTop;
-    button.classList.toggle("is-at-review", reachedReview);
+    const lastStepRect = lastStep.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const reviewIsClear =
+      reachedReview && lastStepRect.bottom <= buttonRect.top - 8;
+    const phase = reviewIsClear ? "return" : reachedReview ? "continue" : "review";
+
+    button.dataset.phase = phase;
+    button.classList.toggle("is-returning", reviewIsClear);
     button.setAttribute(
       "aria-label",
-      reachedReview ? "Return to the introduction" : "Go to review the steps"
+      phase === "return"
+        ? "Return to the introduction"
+        : phase === "continue"
+          ? "Continue through the review steps"
+          : "Go to review the steps"
     );
   };
   window.addEventListener("scroll", updateDirection, { passive: true });
+  window.addEventListener("resize", updateDirection, { passive: true });
   updateDirection();
   button.addEventListener("click", () => {
-    const destination = button.classList.contains("is-at-review") ? byId("intro") : review;
+    const phase = button.dataset.phase;
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    window.scrollTo({ top: destination.offsetTop, behavior });
+    let top;
+
+    if (phase === "return") {
+      top = byId("intro").offsetTop;
+    } else if (phase === "continue") {
+      const lastStepBottom = window.scrollY + lastStep.getBoundingClientRect().bottom;
+      const buttonClearance = window.innerHeight - button.getBoundingClientRect().top + 12;
+      const maximumScroll = document.documentElement.scrollHeight - window.innerHeight;
+      top = Math.min(
+        maximumScroll,
+        Math.max(review.offsetTop, lastStepBottom - window.innerHeight + buttonClearance)
+      );
+    } else {
+      top = review.offsetTop;
+    }
+
+    window.scrollTo({ top, behavior });
   });
 }
 

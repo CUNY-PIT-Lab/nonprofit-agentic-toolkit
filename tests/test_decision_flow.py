@@ -97,8 +97,13 @@ class LandingInterface(unittest.TestCase):
             r"@media \(max-width: 1100px\)[\s\S]*?\.review-jump\s*\{\s*display:\s*block",
         )
         self.assertIn('window.addEventListener("scroll"', APP_JS)
+        self.assertIn('window.addEventListener("resize"', APP_JS)
         self.assertIn("window.scrollTo", APP_JS)
-        self.assertIn("is-at-review", APP_JS)
+        self.assertIn('review.querySelector(".review-list > li:last-child")', APP_JS)
+        self.assertIn('phase === "continue"', APP_JS)
+        self.assertIn("lastStep.getBoundingClientRect()", APP_JS)
+        self.assertIn("is-returning", APP_JS)
+        self.assertNotIn("is-at-review", APP_JS)
 
     def test_type_scale_is_compact_and_visually_restrained(self):
         sizes = [int(value) for value in re.findall(r"font-size:\s*(\d+)px", CSS)]

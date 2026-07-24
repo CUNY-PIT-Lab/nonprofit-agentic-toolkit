@@ -189,7 +189,7 @@ h1, h2, h3 { letter-spacing: -.02em; }
   stroke-width: 2;
   transition: transform 180ms ease;
 }
-.review-jump.is-at-review svg { transform: rotate(180deg); }
+.review-jump.is-returning svg { transform: rotate(180deg); }
 
 .review-overview {
   padding: 54px max(20px, calc((100vw - 1120px) / 2)) 66px;
