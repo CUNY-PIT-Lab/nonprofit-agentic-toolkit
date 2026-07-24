@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local prototype server for the Non-Profit AI Toolkit — entry screen + Step 1.
+"""Local prototype server for the Nonprofit AI toolkit entry screen and first test.
 
 Serves index.html and proxies chat to GLM-5.2 on Ollama Cloud. The API key is
 read from the environment and never written to disk.
@@ -65,7 +65,7 @@ def strip_reasoning(text):
 
 # Decision-led prompts for the cumulative adoption record.
 ONBOARD = (
-    "You guide the Strategic Fit entry screen in the Non-Profit AI Toolkit. Help a nonprofit "
+    "You guide the strategic fit entry screen in the Nonprofit AI toolkit. Help a nonprofit "
     "staff member decide whether a proposed AI use warrants the six-test review.\n\n"
     "Read the FULL conversation each turn. Then do ONE of these:\n"
     "- If they have answered FEWER THAN 4 of your questions so far, ask exactly ONE short follow-up. "
@@ -74,18 +74,19 @@ ONBOARD = (
     "be; whether a non-AI change could meet the need; current staff confidence and capacity; the "
     "accountable owner; or reasons to stop the review. Never ask them to paste records, names, or "
     "confidential text. Ask for categories and practices only. Give the question with no preamble, "
-    "list, or praise.\n"
-    "- If they have already answered 4 of your questions, stop asking. Write a short Entry record "
+    "list, or praise. The reply may contain at most one question mark.\n"
+    "- If they have already answered 4 of your questions, stop asking. Write a short entry record "
     "with five labeled lines: Proposed use, Strategic fit, People affected, Readiness, and Unknowns. "
     "Use only facts they supplied. Mark missing facts as unknown. End with "
-    "(→ Step 1: Red Line Test).\n\n"
+    "(→ Step 1: red line test).\n\n"
     "Teach one relevant AI-literacy point only when it helps the current decision. Keep it to one "
-    "sentence before the question. Plain language. No buzzwords, slogans, or em-dash pivots."
+    "sentence before the question. Use sentence case for every heading and label. Plain language. "
+    "No buzzwords, slogans, or em-dash pivots."
 )
 
 ESTIMATE = (
-    "You maintain the cumulative AI Adoption Record for the Non-Profit AI Toolkit. The staff member "
-    "has completed the Strategic Fit entry screen. Use only what they disclosed. Do not invent "
+    "You maintain the cumulative AI adoption record for the Nonprofit AI toolkit. The staff member "
+    "has completed the strategic fit entry screen. Use only what they disclosed. Do not invent "
     "policy, capacity, consent, approval, or technical facts.\n\n"
     "Write three short sections in plain language:\n\n"
     "**Entry record** — Proposed use; Mission or strategic-plan connection; People affected; Current "
@@ -94,20 +95,20 @@ ESTIMATE = (
     "it.\n\n"
     "**Decisions made** — list only decisions the staff member actually made. If none were made, say "
     "'No adoption decision yet.'\n\n"
-    "**Next test** — name the 2 or 3 non-negotiable conditions the Red Line Test must resolve. Include "
+    "**Next test** — name the 2 or 3 non-negotiable conditions the red line test must resolve. Include "
     "data privacy when the proposed use may touch organizational information. Ask about categories "
     "and practices, never raw records or identifying details.\n\n"
     "End with: This record is a draft for review by the organization. Keep the whole reply under "
-    "190 words. No slogans or em-dash pivots."
+    "190 words. Use sentence case for every heading and label. No slogans or em-dash pivots."
 )
 
 
 def redline_prompt(org, context=""):
-    """Build the Step-1 Red Line Test from the cumulative record."""
+    """Build the first red line test from the cumulative record."""
     name = (org.get("name") or "").strip() or "the organization"
     context = (context or "").strip()
     base = (
-        "You guide Step 1, the Red Line Test, for %s in the Non-Profit AI Toolkit. Build on the Entry "
+        "You guide step 1, the red line test, for %s in the Nonprofit AI toolkit. Build on the entry "
         "record. Help staff examine the non-negotiable conditions for the proposed AI use.\n\n"
         "Use three data classes:\n"
         "- Public: approved public information.\n"
@@ -116,13 +117,15 @@ def redline_prompt(org, context=""):
         "- Sensitive: identifying participant, applicant, staff, donor, health, legal, financial, "
         "credential, or case information.\n\n"
         "Read the FULL conversation each turn. If the staff member has answered FEWER THAN 5 of your "
-        "Step 1 questions, ask exactly ONE question about the largest remaining unknown: data "
+        "step 1 questions, ask exactly ONE question about the largest remaining unknown: data "
         "categories, ownership, consent, storage, access, privacy policy, or permitted environment; "
         "human decision authority; equitable access or discriminatory effects; independent review, "
         "audit, correction, or recourse; intellectual-property ownership; staff capacity; or the "
         "organization's ability to stop the work. Reference the prior answer. Never request raw "
-        "records, names, identifying details, confidential text, or document uploads.\n\n"
-        "After 5 answers, stop asking and write a short Red Line record with labeled lines: Proposed "
+        "records, names, identifying details, confidential text, or document uploads. Reply with at "
+        "most one short context sentence and exactly one question. Use no heading, question number, "
+        "praise, recap, list, or example. The reply may contain at most one question mark.\n\n"
+        "After 5 answers, stop asking and write a short red line record with labeled lines: Proposed "
         "use, Data boundary, Human authority, Equity and access, Audit and recourse, Ownership and "
         "capacity, Unmet conditions, Decision owners, and Unknowns. Use only supplied facts. Sensitive "
         "data in an external AI tool is Prohibited. An unclear classification is Restricted pending "
@@ -132,11 +135,11 @@ def redline_prompt(org, context=""):
         "- MAYBE when staff can negotiate or verify one or more conditions and no supplied fact shows "
         "that a non-negotiable condition has failed.\n"
         "- NO when a supplied fact shows that the proposal cannot meet a non-negotiable condition.\n"
-        "End with exactly one token: (Outcome: YES — Proceed to Step 2), "
-        "(Outcome: MAYBE — Negotiate and return to Step 1), or (Outcome: NO — Walk Away).\n\n"
+        "End with exactly one token: (Outcome: yes. Proceed to step 2), "
+        "(Outcome: maybe. Negotiate and return to step 1), or (Outcome: no. Walk away).\n\n"
         "The model drafts the route. The organization decides after the responsible data, program, "
-        "and governance owners review it. Keep the language plain and short. No slogans or em-dash "
-        "pivots." % name
+        "and governance owners review it. Use sentence case for every heading and label. Keep the "
+        "language plain and short. No slogans or em-dash pivots." % name
     )
     if context:
         base += ("\n\nThe cumulative adoption record so far is:\n\"%s\"\nTreat it as organization-"

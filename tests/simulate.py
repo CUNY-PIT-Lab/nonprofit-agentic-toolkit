@@ -104,16 +104,16 @@ def run_persona(p, chk, verbose):
         c = (call({"mode": "onboard", "messages": hist, "context": ctx}).get("content") or "")
         chk.ok(bool(c), "interview turn %d returned content" % (i + 1))
         chk.ok(not leaks_reasoning(c), "turn %d has no leaked reasoning tokens" % (i + 1))
-        if "→ stage" in c.lower() or "→stage" in c.lower():
+        if "→ step 1" in c.lower() or "→step 1" in c.lower():
             routing = c
             break
         print("  Q%d: %s" % (i + 1, short(c, 300 if verbose else 160)))
-        chk.ok(c.count("?") <= 2, "turn %d asks one question, not a batch" % (i + 1))
+        chk.ok(c.count("?") <= 1, "turn %d asks one question, not a batch" % (i + 1))
         ans = p["answers"][i] if i < len(p["answers"]) else "not sure — what do you suggest?"
         hist += [{"role": "assistant", "content": c}, {"role": "user", "content": ans}]
         ctx += "\n— " + ans
     chk.ok(routing is not None, "interview reached a routing recommendation")
-    chk.ok(bool(routing) and "stage" in routing.lower(), "routing names at least one stage")
+    chk.ok(bool(routing) and "step 1" in routing.lower(), "routing names the next step")
     if routing:
         print("  ROUTE: " + short(routing, 300 if verbose else 200))
 
@@ -138,7 +138,7 @@ def run_persona(p, chk, verbose):
             redline_record = a
             break
         print("  RED LINE Q%d: %s" % (i + 1, short(a, 300 if verbose else 160)))
-        chk.ok(a.count("?") <= 2, "red-line turn %d asks one question, not a batch" % (i + 1))
+        chk.ok(a.count("?") <= 1, "red-line turn %d asks one question, not a batch" % (i + 1))
         ans = p["redlines"][i] if i < len(p["redlines"]) else "The responsible owner has not decided that yet."
         p_hist += [{"role": "assistant", "content": a}, {"role": "user", "content": ans}]
         ctx += "\n— Step 1 response: " + ans
