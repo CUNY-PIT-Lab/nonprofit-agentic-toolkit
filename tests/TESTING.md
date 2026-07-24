@@ -1,64 +1,39 @@
-# Testing practice — simulated runs
+# Testing
 
-`simulate.py` is the prototype's test practice: it replays **scripted user runs** against the live app and checks the invariants each stage is supposed to hold.
-
-It simulates the browser by calling the **same `/api/chat` endpoint, in the same order, with the same payload shape** the page sends — `onboard` (the adaptive interview), `estimate` (the projection after Core 1), and `assistant` (Stage 2). No headless browser is needed; the request sequence *is* the run.
-
-## Run
+The key-free suite covers authentication, authorization, CSRF, stage order, idempotency, persistence, synthesis, annotations, interface source checks, and reasoning-trace removal.
 
 ```bash
-# 1. start the server in one terminal (key in env)
-export OLLAMA_API_KEY="…"; python3 server.py
-
-# 2. run the simulation in another
-python3 tests/simulate.py              # all personas
-python3 tests/simulate.py --persona maple
-python3 tests/simulate.py --verbose    # fuller model replies
+./run.sh test
 ```
 
-Exit code is `0` when every check passes, `1` otherwise — so it drops into CI or a pre-demo check unchanged.
+This runs full `unittest` discovery across `tests/test_*.py`.
 
-There is also a key-free unit test for the reasoning-token strip — no server or key needed:
+## Local authenticated simulation
+
+The simulation exercises the same account and record routes as the browser:
+
+`register → verify → sign in → create a record → complete seven stages → synthesize → annotate`
+
+Start the development server with the memory email adapter. The deterministic model adapter keeps the run key-free:
 
 ```bash
-python3 tests/test_strip.py
+APP_ENV=development \
+EMAIL_BACKEND=memory \
+MODEL_BACKEND=stub \
+PUBLIC_APP_URL=http://127.0.0.1:8765 \
+AUTH_PEPPER=local-development-only-pepper-change-before-production \
+python3 server.py
 ```
 
-## What a persona exercises
+In another terminal:
 
-Each persona is one org: a free-write plus a bank of interview answers, plus a few Stage-2 task probes. One run walks the whole sequence:
-
-`free-write → adaptive interview → routing → estimate → Stage-2 tasks`
-
-## What it checks
-
-| Stage | Invariant |
-|---|---|
-| Interview | each turn returns content; **one question, not a batch** (regression guard against the old 3-at-once); the loop **reaches a routing** recommendation that **names a stage** |
-| Estimate | output has both a **`your sequence`** and a **`broader set`** section, and carries **effort markers** (session / weeks / ongoing) |
-| Stage 2 — draft | a drafting task returns an answer (the assistant handles more than service lookup) |
-| Stage 2 — PII | a message containing fake PII triggers a **warning to remove identifying details** |
-| Stage 2 — scope | for an org with a service list, an out-of-directory question is **flagged as not in the directory** |
-| Stage 2 — all | **no Fortune leakage** for a non-Fortune org (guards the org-agnostic rewrite) |
-| Every stage | **no leaked reasoning tokens** — no `<think>` / `◁think▷` markers survive into content (guards the `strip_reasoning` fix) |
-
-Because the model is live, replies vary run to run, so the checks are **keyword-tolerant**, not exact-match. A failure means the behavior drifted, not that the wording changed.
-
-## Adding a persona
-
-Append a dict to `PERSONAS` in `simulate.py`:
-
-```python
-{
-  "id": "shortname", "org": "Org Name", "services": "- service one\n- service two",  # "" for no directory
-  "freewrite": "what they'd type in the box…",
-  "answers": ["answer to Q1", "answer to Q2", "answer to Q3"],   # consumed in order
-  "stage2": [("draft", "a task…"), ("pii", "…SSN 123-45-6789…"), ("scope", "a service you don't offer?")],
-}
+```bash
+python3 tests/simulate.py
+python3 tests/simulate.py --verbose
 ```
 
-The personas are deliberately **not Fortune** (Maple food pantry, Harbor legal aid) so every run also proves the toolkit serves a range of orgs, not one hardcoded case.
+The harness accepts loopback HTTP URLs only. It registers a unique synthetic user, reads the loopback-only memory outbox, and follows the normal verification-token flow. Tokens and passwords stay in memory and never appear in output.
 
-## Driving the real browser (optional)
+Set `MODEL_BACKEND=ollama` and `OLLAMA_API_KEY` on the local server to exercise live model responses. Wording may vary; the harness checks saved state, required response counts, graph creation, annotations, and reasoning-trace boundaries.
 
-This harness covers the request flow. To drive the actual UI (type into the box, click through, watch it render), a Playwright script can hit the same `http://127.0.0.1:8765`. Ask if you want that added — it's slower and flakier against a live model, which is why the request-replay harness is the default practice.
+Production has no development outbox or stub model, so the simulation cannot run against a deployed service.

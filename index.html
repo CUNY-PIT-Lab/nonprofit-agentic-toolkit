@@ -1,446 +1,337 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Nonprofit AI toolkit | guided review</title>
-<style>
-  :root{
-    --ink:#17191d;
-    --ink2:#3f4650;
-    --paper:#ffffff;
-    --surface:#f7f8fa;
-    --line:#d9dde3;
-    --line2:#b7bec8;
-    --muted:#6b7280;
-    --accent:#1f5fbf;
-    --accent-dark:#174a94;
-    --accent-soft:#eef4fc;
-    --green:#2f6b4f;
-    --ochre:#8a6519;
-    --danger:#9a3c36;
-    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;min-height:100%}
-  body{background:var(--paper);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
-  button,input,textarea{font:inherit}
-  button{appearance:none}
-  .hidden{display:none!important}
-
-  /* landing screen */
-  .landing{min-height:100vh;background:var(--paper);display:flex;flex-direction:column}
-  .landing-top{min-height:68px;padding:0 clamp(24px,4vw,64px);display:flex;align-items:center;
-    justify-content:space-between;gap:24px;border-bottom:1px solid var(--line)}
-  .landing-brand{font-size:16px;font-weight:650;letter-spacing:-.01em}
-  .landing-note{font-size:13px;color:var(--muted);text-align:right}
-  .landing-main{width:min(1180px,100%);margin:0 auto;display:grid;grid-template-columns:minmax(0,.92fr) minmax(460px,1.08fr);
-    gap:clamp(64px,9vw,120px);padding:clamp(64px,9vh,104px) clamp(24px,4vw,64px) 56px;align-items:start}
-  .hero{padding-top:2px}
-  .hero h1{max-width:620px;margin:0;font-size:clamp(34px,3.7vw,50px);font-weight:580;line-height:1.08;
-    letter-spacing:-.035em}
-  .hero-copy{max-width:570px;margin:24px 0 0;font-size:16px;line-height:1.55;color:var(--ink2)}
-  .outcome-copy{max-width:570px;margin:20px 0 0;font-size:13px;line-height:1.55;color:var(--muted)}
-  .outcome-copy b{color:inherit;font-weight:600}
-  .primary{margin-top:32px;background:var(--accent);color:#fff;border:1px solid var(--accent);padding:12px 18px;
-    min-width:156px;font-weight:620;font-size:14px;cursor:pointer;transition:background .15s ease,border-color .15s ease}
-  .primary:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
-  .primary:focus-visible,.btn:focus-visible,.overview-btn:focus-visible,.chip:focus-visible{
-    outline:3px solid rgba(31,95,191,.2);outline-offset:3px}
-  .process{border-top:1px solid var(--ink);padding-top:20px}
-  .process h2{margin:0;font-size:16px;font-weight:650;letter-spacing:-.01em}
-  .process-intro{max-width:620px;margin:9px 0 24px;color:var(--muted);font-size:13px}
-  .path{display:grid;grid-template-columns:1fr;border-bottom:1px solid var(--line)}
-  .path-item{min-width:0;display:grid;grid-template-columns:34px minmax(150px,.68fr) minmax(0,1fr);
-    gap:12px;padding:12px 0;border-top:1px solid var(--line);align-items:baseline}
-  .path-no{display:block;font-size:13px;font-weight:650;color:var(--accent)}
-  .path-name{display:block;font-weight:620;line-height:1.35;font-size:13px}
-  .path-desc{display:block;color:var(--muted);font-size:12px;line-height:1.45}
-  .outcome-rail{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:28px}
-  .outcome{padding-top:12px;border-top:1px solid var(--line)}
-  .outcome strong{display:block;font-size:13px;font-weight:650}
-  .outcome span{display:block;margin-top:5px;color:var(--muted);font-size:11.5px;line-height:1.45}
-  .landing-foot{margin-top:auto;padding:18px clamp(24px,4vw,64px) 24px;color:var(--muted);
-    font-size:12px;border-top:1px solid var(--line)}
-
-  /* working application */
-  .app{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh;background:var(--paper)}
-  .side{position:sticky;top:0;height:100vh;background:var(--paper);color:var(--ink);
-    display:flex;flex-direction:column;padding:25px 20px 20px;border-right:1px solid var(--line)}
-  .brand{font-size:16px;font-weight:650;line-height:1.25;padding:0 8px 24px;border-bottom:1px solid var(--line)}
-  .orgchip{margin:16px 8px 18px;font-size:13px;color:var(--ink)}
-  .orgchip small{display:block;margin-top:3px;color:var(--muted);font-size:11px}
-  .stage-nav{display:flex;flex-direction:column}
-  .lv{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:8px;align-items:center;padding:11px 8px;
-    border-top:1px solid var(--line);font-size:12.5px;color:var(--ink2);cursor:pointer}
-  .lv .ix{font-size:12px;font-weight:650;color:var(--muted);text-align:center}
-  .lv:hover{background:var(--surface)}
-  .lv.on{margin-left:-20px;padding-left:26px;background:var(--accent-soft);border-left:2px solid var(--accent);
-    color:var(--accent-dark);font-weight:650}
-  .lv.on .ix{color:var(--accent)}.lv.done .ix{color:var(--green)}
-  .lv.lock{color:#8a919c;cursor:not-allowed}.lv.lock .ix{opacity:.75}
-  .lv .lk{margin-left:auto;font-size:9px;color:var(--muted)}
-  .overview-btn{margin-top:auto;background:transparent;color:var(--ink2);border:1px solid var(--line2);
-    padding:10px 12px;text-align:left;font-size:12px;font-weight:600;cursor:pointer}
-  .overview-btn:hover{border-color:var(--ink2)}
-  .foot{margin-top:13px;padding:12px 4px 0;font-size:10.5px;color:var(--muted);border-top:1px solid var(--line)}
-
-  .main{min-width:0;display:flex;flex-direction:column}
-  .wrap{width:100%;max-width:none;min-height:100vh;padding:52px clamp(32px,6vw,88px) 40px;display:flex;flex-direction:column}
-  .stage-label{font-size:12px;color:var(--accent);font-weight:650;margin-bottom:8px}
-  .page-title{margin:0;font-size:clamp(30px,3.2vw,42px);font-weight:580;line-height:1.08;letter-spacing:-.03em}
-  .page-intro{margin:16px 0 32px;max-width:760px;color:var(--ink2);font-size:14px}
-  .start-panel{max-width:900px;padding:0}
-  .field{margin-bottom:24px}
-  .field label{display:block;color:var(--ink);font-size:13px;font-weight:650;margin-bottom:8px}
-  input.org,textarea,.compose input{width:100%;border:1px solid var(--line2);border-radius:0;padding:13px 14px;color:var(--ink);
-    background:#fff;font-size:14px;transition:border-color .15s,box-shadow .15s}
-  input.org{max-width:none}
-  textarea{min-height:230px;resize:vertical;line-height:1.6}
-  input:focus,textarea:focus,.compose input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(31,95,191,.1)}
-  .row{display:flex;align-items:center;gap:16px;margin-top:13px;flex-wrap:wrap}
-  .btn{background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:0;padding:11px 17px;
-    cursor:pointer;font-size:13px;font-weight:620}
-  .btn:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
-  .btn:disabled{background:#aeb4bd;border-color:#aeb4bd;cursor:not-allowed}
-  .btn.g{background:var(--accent);border-color:var(--accent)}
-  .btn.g:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
-  .hint{max-width:620px;color:var(--muted);font-size:12px}
-
-  .chat{max-width:980px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
-    background:var(--paper);overflow:hidden;min-height:calc(100vh - 280px);display:flex;flex-direction:column}
-  #intake.hidden{display:none}
-  .stream{padding:8px 0;display:flex;flex:1;flex-direction:column;gap:0;min-height:360px;
-    max-height:none;overflow-y:auto}
-  .m{display:grid;grid-template-columns:76px minmax(0,1fr);gap:18px;max-width:100%;align-items:start;
-    padding:20px 14px;border-bottom:1px solid var(--line)}
-  .m .b{padding:0;font-size:14px;line-height:1.6}
-  .m.u{align-self:stretch}
-  .m.u .b{background:transparent;color:var(--ink)}
-  .m.a{background:var(--surface)}
-  .m.a .b{background:transparent}
-  .m .av{font-size:11px;line-height:1.3;color:var(--muted);padding-top:3px}
-  .m.u .av,.m.a .av{text-align:left;color:var(--accent)}
-  .m .b b{font-weight:700}
-  .think i{display:inline-block;width:5px;height:5px;border-radius:50%;background:#9299a3;margin-right:4px;animation:bl 1s infinite}
-  .think i:nth-child(2){animation-delay:.2s}.think i:nth-child(3){animation-delay:.4s}
-  @keyframes bl{0%,80%{opacity:.3}40%{opacity:1}}
-  .compose{display:flex;gap:10px;padding:14px 0;background:var(--paper)}
-  .compose input{flex:1;font-size:14px;padding:13px 15px}
-  .compose .btn{padding:12px 20px}
-  .progress{font-size:12px;color:var(--muted);margin:12px 2px 0}
-
-  .route{max-width:980px;margin-top:34px;border-top:1px solid var(--ink);padding:20px 0 0}
-  .route .lead{font-size:13px;color:var(--ink);margin-bottom:12px;font-weight:650}
-  .qt{font-size:14px;line-height:1.6}
-  .tag{display:inline-block;font:650 11px/1.2 var(--sans);color:var(--accent-dark);
-    background:var(--accent-soft);padding:5px 7px;margin:3px 3px 3px 0}
-
-  .head2{display:flex;align-items:baseline;gap:14px;margin-bottom:0;flex-wrap:wrap}
-  .head2 h1{margin:0;font-size:clamp(30px,3.2vw,42px);font-weight:580;line-height:1.08;letter-spacing:-.03em}
-  .carry{font-size:13.5px;color:var(--ink2);margin:16px 0 24px;max-width:760px}
-  .steps{display:flex;gap:24px;margin-bottom:20px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:14px}
-  .step{display:flex;gap:8px;align-items:center;font-size:12px;color:#858c96}
-  .step.done{color:var(--green);font-weight:600}
-  .ck{width:9px;height:9px;border:1px solid var(--line2);border-radius:50%;flex:none}
-  .step.done .ck{background:var(--green);border-color:var(--green)}
-  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-  .chip{background:#fff;border:1px solid var(--line);color:var(--ink2);padding:6px 12px;font-size:11.5px;cursor:pointer}
-  .chip:hover{border-color:var(--accent);background:var(--accent-soft)}
-  .act{display:flex;gap:9px;align-items:center;margin-top:13px;flex-wrap:wrap}
-  .act .btn{padding:10px 15px;font-size:12px}
-  .tiny{margin-top:20px;font-size:11.5px;line-height:1.55;color:var(--muted);max-width:820px}
-  .tiny a{color:var(--accent);cursor:pointer}
-  #svc{min-height:84px;font-size:12.5px;margin-top:9px}
-  .win,.hold,.err{max-width:980px;margin-top:15px;padding:12px 14px;font-size:12.5px;border-left:2px solid}
-  .win{background:#f4f8f5;border-color:var(--green);color:#24513d}
-  .hold{background:#faf8f1;border-color:var(--ochre);color:#654c18}
-  .err{background:#fbf5f4;border-color:var(--danger);color:#70312d}
-
-  @media (max-width:1100px){
-    .landing-main{grid-template-columns:1fr;gap:64px}
-    .app{grid-template-columns:225px minmax(0,1fr)}
-    .side{padding-left:15px;padding-right:15px}
-  }
-  @media (max-width:760px){
-    .landing-top{min-height:62px;padding:0 20px}
-    .landing-note{display:none}
-    .landing-main{padding:48px 20px 36px;gap:52px}
-    .hero h1{font-size:34px}.hero-copy{font-size:15px}
-    .primary{width:auto;min-width:0}
-    .path-item{grid-template-columns:28px minmax(0,1fr)}
-    .path-desc{grid-column:2}
-    .outcome-rail{grid-template-columns:1fr;gap:18px}
-    .app{grid-template-columns:1fr}
-    .side{position:sticky;z-index:20;height:auto;padding:13px 14px 0;border-right:0;border-bottom:1px solid var(--line)}
-    .brand{font-size:15px;padding:0 2px 13px;border-bottom:0}
-    .orgchip,.overview-btn,.foot{display:none}
-    .stage-nav{flex-direction:row;overflow-x:auto;border-top:1px solid var(--line)}
-    .lv{flex:0 0 158px;border-top:0;border-right:1px solid var(--line);padding:10px 8px}
-    .lv.on{margin-left:0;padding-left:8px;border-left:0;border-bottom:2px solid var(--accent)}
-    .lv .lk{display:none}
-    .wrap{min-height:calc(100vh - 95px);padding:34px 20px 30px}
-    .page-title,.head2 h1{font-size:32px}
-    textarea{min-height:190px}
-    .chat{min-height:calc(100vh - 280px)}
-    .stream{min-height:330px}
-    .m,.m.u{grid-template-columns:56px minmax(0,1fr);gap:10px;padding-left:4px;padding-right:4px}
-    .compose{padding:12px;flex-wrap:wrap}.compose input{min-width:0}.compose .btn{width:100%}
-  }
-
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A guided review for nonprofit organizations deciding whether and how to use AI.">
+  <title>Nonprofit AI toolkit</title>
+  <link rel="stylesheet" href="static/app.css?v=20260724-synthesis2">
+  <script src="static/vendor/cytoscape.min.js?v=3.34.0" defer></script>
+  <script src="static/app.js?v=20260724-synthesis6" defer></script>
 </head>
 <body>
-<section class="landing" id="landing">
-  <header class="landing-top">
-    <div class="landing-brand">Nonprofit AI toolkit</div>
-    <div class="landing-note">A decision guide for nonprofit staff</div>
-  </header>
-  <div class="landing-main">
-    <div class="hero">
-      <h1>Decide whether an AI proposal fits your organization.</h1>
-      <p class="hero-copy">Nonprofit staff review one AI proposal at a time. The guide explains each decision and keeps the reasoning in one record.</p>
-      <p class="outcome-copy">Each test records one route: <b>proceed</b>, <b>negotiate and return</b>, or <b>walk away</b>. Your organization makes the decision.</p>
-      <button class="primary" onclick="startToolkit()">Start the review</button>
-    </div>
-    <div class="process">
-      <h2>The review</h2>
-      <p class="process-intro">Start with one proposal. Your answers stay in one adoption record across six tests.</p>
-      <div class="path" aria-label="Toolkit decision sequence">
-        <div class="path-item"><span class="path-no">1</span><span class="path-name">Red line test</span><span class="path-desc">Set the conditions the proposal must meet.</span></div>
-        <div class="path-item"><span class="path-no">2</span><span class="path-name">Stress test</span><span class="path-desc">Check failure, security, correction, and recourse.</span></div>
-        <div class="path-item"><span class="path-no">3</span><span class="path-name">Costs and benefits</span><span class="path-desc">Compare labor, risk, maintenance, and a non-AI option.</span></div>
-        <div class="path-item"><span class="path-no">4</span><span class="path-name">Hidden curriculum</span><span class="path-desc">Check what the tool changes about authority and work.</span></div>
-        <div class="path-item"><span class="path-no">5</span><span class="path-name">Accountability</span><span class="path-desc">Name who reviews, explains, corrects, or stops it.</span></div>
-        <div class="path-item"><span class="path-no">6</span><span class="path-name">Internal and external review</span><span class="path-desc">Involve staff and the people affected.</span></div>
-      </div>
-      <div class="outcome-rail">
-        <div class="outcome"><strong>Proceed</strong><span>The responsible people confirm the proposal passes.</span></div>
-        <div class="outcome"><strong>Negotiate and return</strong><span>Record what must change, who owns it, and what evidence is needed.</span></div>
-        <div class="outcome"><strong>Walk away</strong><span>Close the proposal and keep the reason.</span></div>
-      </div>
-    </div>
-  </div>
-  <footer class="landing-foot">Describe categories and current practice. Keep names, records, and confidential text in your approved systems.</footer>
-</section>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
 
-<div class="app hidden" id="toolkitApp">
-  <aside class="side">
-    <div class="brand">Nonprofit AI toolkit</div>
-    <div class="orgchip" id="orgchip">Your organization<small>add it on the first screen</small></div>
-    <nav class="stage-nav" aria-label="Decision tests">
-      <div class="lv on" id="lv-core" onclick="go('core')"><span class="ix">0</span> Describe the proposal</div>
-      <div class="lv lock" id="lv-app" onclick="go('app')"><span class="ix">1</span> Red line test <span class="lk">locked</span></div>
-      <div class="lv lock" id="lv-2"><span class="ix">2</span> Stress test <span class="lk">locked</span></div>
-      <div class="lv lock"><span class="ix">3</span> Costs and benefits <span class="lk">locked</span></div>
-      <div class="lv lock"><span class="ix">4</span> Hidden curriculum <span class="lk">locked</span></div>
-      <div class="lv lock"><span class="ix">5</span> Accountability <span class="lk">locked</span></div>
-      <div class="lv lock"><span class="ix">6</span> Internal and external review <span class="lk">locked</span></div>
-    </nav>
-    <button class="overview-btn" onclick="showLanding()">Back to overview</button>
-    <div class="foot">Guided review</div>
+  <div id="siteShell">
+    <header class="site-header">
+      <a class="wordmark" href="#intro" data-action="show-landing">Nonprofit AI toolkit</a>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="#review">Review the steps</a>
+        <button class="text-button" type="button" data-auth-open="login">Sign in</button>
+        <button class="button button-small" type="button" data-auth-open="register">Create an account</button>
+      </nav>
+      <button class="menu-button" id="menuButton" type="button" aria-expanded="false" aria-controls="mobileMenu">
+        <span class="sr-only">Open menu</span>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </header>
+
+    <div class="mobile-menu" id="mobileMenu" hidden>
+      <a href="#review">Review the steps</a>
+      <button class="text-button" type="button" data-auth-open="login">Sign in</button>
+      <button class="text-button" type="button" data-auth-open="register">Create an account</button>
+    </div>
+
+    <main id="main-content">
+      <section class="intro" id="intro" aria-labelledby="introTitle">
+        <div class="intro-copy">
+          <p class="eyebrow">A public-interest decision guide</p>
+          <h1 id="introTitle">Review whether and how to use AI in your organization.</h1>
+          <p>Work through six practical tests, then bring your responses together in a synthesis. The toolkit keeps context, decisions, evidence, and open questions in one adoption record.</p>
+        </div>
+        <div class="entry-actions" aria-labelledby="entryActionsTitle">
+          <h2 id="entryActionsTitle">Begin the guided review</h2>
+          <p>Sign in or create a verified account to save your work, return to a review, and annotate its concept map.</p>
+          <button class="button button-wide" type="button" data-action="start-review">Sign in</button>
+          <button class="button button-secondary button-wide" type="button" data-auth-open="register">Create an account</button>
+          <p class="microcopy">We will send a verification email before the toolkit opens.</p>
+        </div>
+        <button class="review-jump" id="reviewJump" type="button" aria-controls="review" aria-label="Go to review the steps">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></svg>
+        </button>
+      </section>
+
+      <section class="review-overview" id="review" aria-labelledby="reviewTitle">
+        <header class="section-heading">
+          <p class="eyebrow">The guided review</p>
+          <h2 id="reviewTitle">Review the steps</h2>
+          <p>Describe one proposal, complete six tests, and use the final synthesis to see how the evidence connects.</p>
+        </header>
+        <ol class="review-list">
+          <li>
+            <span class="step-number">1</span>
+            <span><strong>Red line test</strong><small>Set the privacy, consent, authority, equity, and ownership conditions the proposal must meet.</small></span>
+          </li>
+          <li>
+            <span class="step-number">2</span>
+            <span><strong>Stress test</strong><small>Examine failure, unsupported output, security, reliability, accessibility, correction, and recourse.</small></span>
+          </li>
+          <li>
+            <span class="step-number">3</span>
+            <span><strong>Costs and benefits</strong><small>Compare labor, risk, resources, maintenance, likely benefits, and a non-AI option.</small></span>
+          </li>
+          <li>
+            <span class="step-number">4</span>
+            <span><strong>Hidden curriculum</strong><small>Review changes to values, behavior, authority, knowledge, invisible work, and dependence.</small></span>
+          </li>
+          <li>
+            <span class="step-number">5</span>
+            <span><strong>Accountability</strong><small>Identify who explains, audits, corrects, suspends, reviews, and eventually retires the system.</small></span>
+          </li>
+          <li>
+            <span class="step-number">6</span>
+            <span><strong>Internal and external review</strong><small>Involve affected staff, participants, existing advisors, governance groups, and approvers.</small></span>
+          </li>
+          <li>
+            <span class="step-number">7</span>
+            <span><strong>Synthesis</strong><small>Review every response and map current conditions, decisions, pathways, and possible next steps.</small></span>
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>A public-interest project. This toolkit supports organizational review and does not provide legal advice.</p>
+      <p>Describe categories and current practice. Keep names, records, and confidential text in approved systems.</p>
+    </footer>
+  </div>
+
+  <div class="toolkit-shell" id="toolkitShell" hidden>
+    <aside class="toolkit-sidebar" id="toolkitSidebar">
+      <div class="toolkit-brand">
+        <button class="plain-button" type="button" data-action="show-landing">Nonprofit AI toolkit</button>
+        <span id="recordName">Guided review</span>
+      </div>
+      <nav class="stage-navigation" id="stageNavigation" aria-label="Review progress"></nav>
+      <div class="sidebar-account">
+        <button class="account-button" id="accountButton" type="button" aria-expanded="false" aria-controls="accountMenu">
+          <span id="accountName">Account</span>
+          <span aria-hidden="true">•••</span>
+        </button>
+        <div class="account-menu" id="accountMenu" hidden>
+          <button type="button" data-action="records">Saved reviews</button>
+          <button type="button" data-action="logout">Sign out</button>
+        </div>
+      </div>
+    </aside>
+
+    <header class="toolkit-mobile-header">
+      <button class="icon-button" id="sidebarToggle" type="button" aria-controls="toolkitSidebar" aria-expanded="false">
+        <span class="sr-only">Open review steps</span>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <strong id="mobileStageTitle">Describe the proposal</strong>
+      <button class="icon-button" type="button" data-action="account-menu" aria-label="Open account menu">•••</button>
+    </header>
+
+    <main class="toolkit-main">
+      <section class="stage-screen" id="recordHome" aria-labelledby="recordHomeTitle">
+        <p class="stage-kicker">Start</p>
+        <h1 id="recordHomeTitle">Describe the proposal</h1>
+        <p class="stage-intro">Enter the organization and describe the proposed use in your own words. The guide will ask one question at a time and save each response.</p>
+        <form class="record-form" id="recordForm">
+          <label for="organizationName">Organization name</label>
+          <input id="organizationName" name="organization_name" type="text" autocomplete="organization" maxlength="160" required>
+          <label for="proposalText">Proposed use and current concerns</label>
+          <textarea id="proposalText" name="proposal" rows="8" minlength="25" maxlength="8000" placeholder="In your own words…" required></textarea>
+          <p class="field-help">Describe categories, policies, practices, and open questions. Leave out names, raw records, and confidential text.</p>
+          <div class="form-actions">
+            <button class="button" id="createRecordButton" type="submit">Begin the review</button>
+            <button class="button button-secondary" type="button" data-action="records">Resume a saved review</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="stage-screen" id="conversationStage" aria-labelledby="stageTitle" hidden>
+        <header class="stage-header">
+          <div>
+            <p class="stage-kicker" id="stageKicker">Step 1</p>
+            <h1 id="stageTitle">Red line test</h1>
+            <p class="stage-intro" id="stageIntro"></p>
+          </div>
+          <span class="save-status" id="saveStatus" role="status" aria-live="polite">Saved</span>
+        </header>
+        <div class="conversation" id="conversation" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <form class="composer" id="messageForm">
+          <label class="sr-only" for="messageInput">Your response</label>
+          <textarea id="messageInput" rows="3" maxlength="8000" placeholder="Your response…"></textarea>
+          <div class="composer-footer">
+            <p>Use categories and current practice. Keep sensitive records in approved systems.</p>
+            <button class="button" id="sendMessageButton" type="submit">Send response</button>
+          </div>
+        </form>
+        <div class="completion-panel" id="completionPanel" hidden>
+          <div>
+            <strong>Review this step</strong>
+            <p id="completionSummary">The guide has enough information to draft this part of the record.</p>
+          </div>
+          <button class="button" id="completeStageButton" type="button">Complete this step</button>
+        </div>
+      </section>
+
+      <section class="stage-screen synthesis-screen" id="synthesisStage" aria-labelledby="synthesisTitle" hidden>
+        <header class="synthesis-header">
+          <div>
+            <p class="stage-kicker">Step 7</p>
+            <h1 id="synthesisTitle">Synthesis</h1>
+            <p class="stage-intro">The model reviews saved responses across the full record and connects key conditions, decisions, pathways, and possible next steps.</p>
+          </div>
+          <div class="synthesis-actions">
+            <button class="button button-secondary" type="button" data-action="review-responses">Review responses</button>
+            <button class="button button-secondary" type="button" data-action="regenerate-map">Regenerate map</button>
+            <button class="button button-secondary" type="button" data-action="export-json">Export JSON</button>
+          </div>
+        </header>
+
+        <div class="analysis-strip" id="analysisStrip" aria-label="Synthesis themes">
+          <button type="button" data-analysis-key="context">Context</button>
+          <button type="button" data-analysis-key="constraints">Constraints</button>
+          <button type="button" data-analysis-key="affordances">Affordances</button>
+          <button type="button" data-analysis-key="infrastructure">Existing AI infrastructure</button>
+          <button type="button" data-analysis-key="use_patterns">Targeted use patterns</button>
+        </div>
+        <section class="analysis-detail" id="analysisDetail" aria-live="polite">
+          <h2 id="analysisDetailTitle">Context</h2>
+          <ul id="analysisDetailList"></ul>
+        </section>
+
+        <div class="map-workspace">
+          <section class="map-panel" aria-labelledby="mapTitle">
+            <div class="map-toolbar">
+              <div>
+                <h2 id="mapTitle">Concept map</h2>
+                <p>Choose a node to inspect its evidence and add an annotation.</p>
+              </div>
+              <div class="map-controls" aria-label="Map controls">
+                <button class="icon-button" type="button" data-map-action="zoom-in" aria-label="Zoom in">+</button>
+                <button class="icon-button" type="button" data-map-action="zoom-out" aria-label="Zoom out">−</button>
+                <button class="icon-button" type="button" data-map-action="fit" aria-label="Fit map to view">Fit</button>
+              </div>
+            </div>
+            <div class="map-legend" aria-label="Concept map legend">
+              <span data-kind="condition">Current conditions</span>
+              <span data-kind="decision">Decision points</span>
+              <span data-kind="pathway">Possible pathways</span>
+              <span data-kind="potential">Potentials</span>
+            </div>
+            <label class="accessible-node-select" for="mapNodeSelect">Choose a map node</label>
+            <select class="accessible-node-select" id="mapNodeSelect"></select>
+            <div class="concept-map" id="conceptMap" role="img" aria-label="Concept map of current conditions, decision points, pathways, and potentials"></div>
+            <div class="map-empty" id="mapEmpty" hidden>
+              <p>The map has not been generated yet.</p>
+              <button class="button" type="button" data-action="regenerate-map">Generate synthesis</button>
+            </div>
+          </section>
+
+          <aside class="node-inspector" id="nodeInspector" aria-labelledby="nodeTitle">
+            <p class="node-kind" id="nodeKind">Select a node</p>
+            <h2 id="nodeTitle">Map details</h2>
+            <p id="nodeDescription">Choose a node in the map to review its meaning and supporting responses.</p>
+            <section class="node-evidence" aria-labelledby="nodeEvidenceTitle">
+              <h3 id="nodeEvidenceTitle">Evidence from your responses</h3>
+              <ul id="nodeEvidence"></ul>
+            </section>
+            <form class="annotation-form" id="annotationForm">
+              <label for="annotationText">Annotation</label>
+              <textarea id="annotationText" rows="6" maxlength="1000" placeholder="Add relevance, risks, dependencies, questions, or a decision…"></textarea>
+              <div class="annotation-footer">
+                <span id="annotationCount">0 / 1000</span>
+                <button class="button button-secondary" id="saveAnnotationButton" type="submit" disabled>Save annotation</button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="auth-dialog" id="authDialog" aria-label="Account">
+    <button class="dialog-close" type="button" data-action="close-auth" aria-label="Close">×</button>
+    <div class="auth-view" id="authLogin">
+      <p class="eyebrow">Your account</p>
+      <h2 id="authTitle">Sign in</h2>
+      <p>Open a saved review or begin a new one.</p>
+      <form id="loginForm">
+        <label for="loginEmail">Email address</label>
+        <input id="loginEmail" name="email" type="email" autocomplete="email" required>
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+        <button class="button button-wide" type="submit">Sign in</button>
+      </form>
+      <button class="auth-link" type="button" data-auth-open="forgot">Forgot your password?</button>
+      <p class="auth-switch">New here? <button type="button" data-auth-open="register">Create an account</button></p>
+    </div>
+
+    <div class="auth-view" id="authRegister" hidden>
+      <p class="eyebrow">Your account</p>
+      <h2>Create an account</h2>
+      <p>Use a work email when that matches your organization’s practice. We will verify the address before opening the toolkit.</p>
+      <form id="registerForm">
+        <label for="registerName">Your name</label>
+        <input id="registerName" name="name" type="text" autocomplete="name" maxlength="120" required>
+        <label for="registerEmail">Email address</label>
+        <input id="registerEmail" name="email" type="email" autocomplete="email" required>
+        <label for="registerPassword">Password</label>
+        <input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="12" required aria-describedby="passwordHelp">
+        <p class="field-help" id="passwordHelp">Use at least 12 characters.</p>
+        <button class="button button-wide" type="submit">Create account</button>
+      </form>
+      <p class="auth-switch">Already have an account? <button type="button" data-auth-open="login">Sign in</button></p>
+    </div>
+
+    <div class="auth-view" id="authForgot" hidden>
+      <p class="eyebrow">Account recovery</p>
+      <h2>Reset your password</h2>
+      <p>Enter the account email. If it is registered, we will send a secure reset link.</p>
+      <form id="forgotForm">
+        <label for="forgotEmail">Email address</label>
+        <input id="forgotEmail" name="email" type="email" autocomplete="email" required>
+        <button class="button button-wide" type="submit">Send reset link</button>
+      </form>
+      <button class="auth-link" type="button" data-auth-open="login">Return to sign in</button>
+    </div>
+
+    <div class="auth-view" id="authReset" hidden>
+      <p class="eyebrow">Account recovery</p>
+      <h2>Choose a new password</h2>
+      <form id="resetForm">
+        <label for="resetPassword">New password</label>
+        <input id="resetPassword" name="password" type="password" autocomplete="new-password" minlength="12" required>
+        <label for="resetPasswordConfirm">Confirm new password</label>
+        <input id="resetPasswordConfirm" name="password_confirm" type="password" autocomplete="new-password" minlength="12" required>
+        <button class="button button-wide" type="submit">Update password</button>
+      </form>
+    </div>
+
+    <div class="auth-view verification-view" id="authVerify" hidden>
+      <p class="eyebrow">Email verification</p>
+      <h2 id="verifyTitle">Check your email</h2>
+      <p id="verifyMessage">Open the verification link we sent before signing in.</p>
+      <button class="button button-wide" id="resendVerificationButton" type="button">Send another verification email</button>
+      <button class="auth-link" type="button" data-auth-open="login">Return to sign in</button>
+    </div>
+    <div class="form-status" id="authStatus" role="status" aria-live="polite"></div>
+  </dialog>
+
+  <dialog class="records-dialog" id="recordsDialog" aria-labelledby="recordsTitle">
+    <button class="dialog-close" type="button" data-action="close-records" aria-label="Close">×</button>
+    <p class="eyebrow">Your account</p>
+    <h2 id="recordsTitle">Saved reviews</h2>
+    <div class="records-list" id="recordsList"></div>
+    <button class="button" type="button" data-action="new-record">Begin a new review</button>
+  </dialog>
+
+  <aside class="response-drawer" id="responseDrawer" aria-labelledby="responseDrawerTitle" hidden>
+    <header>
+      <div>
+        <p class="eyebrow">Adoption record</p>
+        <h2 id="responseDrawerTitle">Saved responses</h2>
+      </div>
+      <button class="dialog-close" type="button" data-action="close-responses" aria-label="Close">×</button>
+    </header>
+    <div id="responseList"></div>
   </aside>
 
-  <main class="main">
-
-    <!-- ===== ENTRY SCREEN (adaptive interview) ===== -->
-    <section class="wrap" id="core">
-      <div class="stage-label">Start</div>
-      <h1 class="page-title">Describe the proposal</h1>
-      <p class="page-intro">Name your organization and explain the proposed use. The guide will ask four follow-up questions before it drafts the first record.</p>
-
-      <div id="fwbox" class="start-panel">
-        <div class="field">
-          <label for="org">Organization name</label>
-          <input class="org" id="org" placeholder="Commonly used name" oninput="syncOrg()" />
-        </div>
-        <div class="field">
-          <label for="fw">Describe the proposal and your concerns.</label>
-          <textarea id="fw" placeholder="In your own words…"></textarea>
-        </div>
-        <div class="row"><button class="btn" id="fwbtn" onclick="begin()">Begin</button><span class="hint" id="fwhint">Do not enter names, client records, or confidential text.</span></div>
-      </div>
-
-      <div id="intake" class="chat hidden">
-        <div class="stream" id="obstream"></div>
-        <div class="compose" id="obcompose"><input id="obmsg" placeholder="Your answer…" onkeydown="if(event.key==='Enter')obSend()" /><button class="btn" id="obbtn" onclick="obSend()">Send</button></div>
-      </div>
-      <div class="progress hidden" id="oprog"></div>
-
-      <div id="route" class="route hidden">
-        <div class="lead">Entry record</div>
-        <div id="routebody"></div>
-        <div class="row"><button class="btn g" onclick="toApp()">Continue to the red line test</button></div>
-      </div>
-      <div id="coreErr"></div>
-    </section>
-
-    <!-- ===== STEP 1 · RED LINE TEST ===== -->
-    <section class="wrap hidden" id="app">
-      <div class="stage-label">Step 1</div>
-      <div class="head2"><h1 id="apptitle">Red line test</h1></div>
-      <p class="carry">The guide reads your entry record, then asks five questions about the conditions your organization must set before proceeding.</p>
-      <div class="steps">
-        <span class="step" id="s1"><span class="ck"></span> Test the conditions</span>
-        <span class="step" id="s2"><span class="ck"></span> Review with responsible owners</span>
-        <span class="step" id="s3"><span class="ck"></span> Record the decision</span>
-      </div>
-
-      <div class="chat">
-        <div class="stream" id="stream"></div>
-        <div class="compose"><input id="msg" placeholder="Your answer…" onkeydown="if(event.key==='Enter')send()" /><button class="btn" id="sendbtn" onclick="send()">Send</button></div>
-      </div>
-
-      <div class="act" id="act"></div>
-      <div id="win"></div>
-      <div class="tiny">
-        This draft stays in the current browser session, while the text you submit goes to an external model. Keep restricted or sensitive information in your approved systems. Your organization decides.
-      </div>
-      <div id="appErr"></div>
-    </section>
-  </main>
-</div>
-
-<script>
-const $ = id => document.getElementById(id);
-const profile = { org:{name:''}, context:'' };   // cumulative, in-session adoption record
-const API_BASE = window.location.hostname === 'zmuhls.github.io'
-  ? 'https://toolkit-api-production-535d.up.railway.app'
-  : '';
-
-function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function fmt(s){return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\((→[^)]*|Outcome:[^)]*)\)/gi,'<span class="tag">$1</span>').replace(/\n/g,'<br>');}
-function orgName(){return profile.org.name.trim() || 'your org';}
-
-async function glm(mode, messages){
-  const r = await fetch(API_BASE + '/api/chat',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({mode, messages, org:profile.org, context:profile.context})});
-  return r.json();
-}
-
-function startToolkit(){
-  $('landing').classList.add('hidden');
-  $('toolkitApp').classList.remove('hidden');
-  window.scrollTo(0,0);
-  requestAnimationFrame(()=>$('org').focus());
-}
-function showLanding(){
-  $('toolkitApp').classList.add('hidden');
-  $('landing').classList.remove('hidden');
-  window.scrollTo(0,0);
-}
-function syncOrg(){
-  profile.org.name = $('org').value;
-  $('orgchip').innerHTML = (profile.org.name.trim() || 'Your organization') + '<small>'+(profile.org.name.trim()?'Proposal record':'add it on the first screen')+'</small>';
-}
-function go(v){
-  if(v==='app' && $('lv-app').classList.contains('lock')) return;
-  $('core').classList.toggle('hidden', v!=='core');
-  $('app').classList.toggle('hidden', v!=='app');
-  $('lv-core').classList.toggle('on', v==='core'); $('lv-app').classList.toggle('on', v==='app');
-  window.scrollTo(0,0);
-}
-function bub(stream, role, html){
-  const m=document.createElement('div'); m.className='m '+(role==='u'?'u':'a');
-  m.innerHTML='<span class="av">'+(role==='u'?'you':'guide')+'</span><div class="b">'+html+'</div>';
-  $(stream).appendChild(m); $(stream).scrollTop=$(stream).scrollHeight; return m;
-}
-
-/* ---- ENTRY SCREEN: adaptive interview — each answer shapes the next question ---- */
-let obhist=[], answered=0;
-async function begin(){
-  const t=$('fw').value.trim(); $('coreErr').innerHTML='';
-  if(t.length<25){ $('fwhint').textContent='Add a few sentences so the guide has enough context.'; return; }
-  profile.context = (profile.org.name?('org: '+profile.org.name+'. '):'') + t;
-  $('fwbox').classList.add('hidden'); $('intake').classList.remove('hidden'); $('oprog').classList.remove('hidden');
-  bub('obstream','u', esc(t));
-  obhist=[{role:'user', content:profile.context}];
-  await obAsk();
-}
-async function obSend(){
-  const v=$('obmsg').value.trim(); if(!v) return;
-  bub('obstream','u', esc(v)); $('obmsg').value='';
-  obhist.push({role:'user',content:v}); profile.context += '\n— ' + v; answered++;
-  await obAsk();
-}
-async function obAsk(){
-  $('obbtn').disabled=true; $('oprog').textContent='Reading your answer…';
-  const th=bub('obstream','a','<span class="think"><i></i><i></i><i></i></span>');
-  const res=await glm('onboard', obhist);
-  $('obbtn').disabled=false;
-  if(!res.content){ th.querySelector('.b').innerHTML='<span style="color:#a32626">'+esc(res.error||'no response')+'</span>'; $('oprog').textContent=''; return; }
-  obhist.push({role:'assistant',content:res.content});
-  if(/→\s*step\s*1/i.test(res.content)){       // entry record reached → begin the Red Line Test
-    th.remove(); $('obcompose').classList.add('hidden'); $('oprog').classList.add('hidden');
-    $('routebody').innerHTML='<div class="qt">'+fmt(res.content)+'</div>'; $('route').classList.remove('hidden');
-    $('route').scrollIntoView({behavior:'smooth',block:'nearest'});
-    $('lv-app').classList.remove('lock'); $('lv-app').querySelector('.lk').textContent=''; $('lv-core').classList.add('done');
-    estimateSequence();                         // summarize the cumulative record and next gate
-  } else {                                      // another shaped question
-    th.querySelector('.b').innerHTML=fmt(res.content);
-    $('oprog').textContent='Question '+(answered+1)+' of 4';
-    $('obmsg').focus();
-  }
-}
-async function estimateSequence(){
-  const box=document.createElement('div');
-  box.style.cssText='margin-top:16px;border-top:1px dashed #e6e9ef;padding-top:14px';
-  box.innerHTML='<div style="font-size:12px;color:#6b7280">Drafting the record…</div>';
-  $('routebody').appendChild(box);
-  const msgs=obhist.concat([{role:'user',content:'Now write my Entry record and next test, exactly as instructed.'}]);
-  const res=await glm('estimate', msgs);
-  if(res.content) profile.context += '\n— Entry record: ' + res.content;
-  box.innerHTML = res.content
-    ? '<div class="qt">'+fmt(res.content)+'</div>'
-    : '<div style="font-size:12px;color:#a32626">'+esc(res.error||'could not estimate')+'</div>';
-  $('route').scrollIntoView({behavior:'smooth',block:'nearest'});
-}
-
-/* ---- STEP 1: Red Line Test, inflected by the entry screen ---- */
-let hist=[];
-function toApp(){
-  $('apptitle').textContent='Red line test'; go('app');
-  if(!hist.length) openRedLine();
-}
-async function openRedLine(){
-  const th=bub('stream','a','<span class="think"><i></i><i></i><i></i></span>');
-  const kick='Begin Step 1 using my Entry record. Ask exactly one Red Line Test question.';
-  const res=await glm('redline',[{role:'user',content:kick}]);
-  if(res.content){ th.querySelector('.b').innerHTML=fmt(res.content); hist=[{role:'user',content:kick},{role:'assistant',content:res.content}]; }
-  else th.querySelector('.b').innerHTML='Which non-negotiable condition should this proposal meet first? Describe policies, categories, or practices, never records or names.';
-}
-async function send(){
-  const v=$('msg').value.trim(); if(!v) return; $('appErr').innerHTML='';
-  bub('stream','u', esc(v)); $('msg').value=''; hist.push({role:'user',content:v}); profile.context += '\n— Step 1 response: ' + v;
-  $('sendbtn').disabled=true; const th=bub('stream','a','<span class="think"><i></i><i></i><i></i></span>');
-  const res=await glm('redline', hist); $('sendbtn').disabled=false;
-  if(!res.content){ th.querySelector('.b').innerHTML='<span style="color:#a32626">'+esc(res.error||'no response')+'</span>'; return; }
-  th.querySelector('.b').innerHTML=fmt(res.content); hist.push({role:'assistant',content:res.content});
-  const outcome=decisionOutcome(res.content);
-  if(outcome){ profile.context += '\n— Step 1 Red Line record: ' + res.content; step1(outcome); }
-}
-function decisionOutcome(text){
-  if(/Outcome:\s*YES/i.test(text)) return 'yes';
-  if(/Outcome:\s*MAYBE/i.test(text)) return 'maybe';
-  if(/Outcome:\s*NO/i.test(text)) return 'no';
-  return '';
-}
-function step1(outcome){
-  $('s1').classList.add('done'); $('s2').classList.remove('done'); $('s3').classList.remove('done');
-  $('act').innerHTML=''; $('win').innerHTML='';
-  if(outcome==='yes'){
-    $('act').innerHTML='<button class="btn" onclick="verify()">I reviewed this with the responsible owners</button> <span class="hint">The guide cannot approve the route.</span>';
-  } else if(outcome==='maybe'){
-    $('win').innerHTML='<div class="hold"><b>Negotiate and return.</b> Record the changed condition in the chat. The guide will test the same red lines again.</div>';
-  } else {
-    $('win').innerHTML='<div class="err"><b>Walk away recorded.</b> The stress test remains locked. The record keeps the reason.</div>';
-  }
-}
-function verify(){ $('s2').classList.add('done'); $('act').innerHTML='<button class="btn g" onclick="finalize()">Record the decision</button>'; }
-function finalize(){ $('s3').classList.add('done'); $('act').innerHTML='';
-  $('win').innerHTML='<div class="win"><b>Red line test complete.</b> The stress test is unlocked and will use this record.</div>';
-  $('lv-app').classList.add('done'); const n2=$('lv-2'); n2.classList.remove('lock'); n2.querySelector('.lk').textContent=''; }
-</script>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

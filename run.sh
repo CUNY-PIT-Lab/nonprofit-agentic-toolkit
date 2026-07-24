@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 #
-# run.sh — launch the Non-Profit AI Toolkit prototype (entry screen + Red Line Test).
+# run.sh — launch the Nonprofit AI toolkit.
 #
 #   ./run.sh           start the server and open the app in your browser
-#   ./run.sh test      start the server, run the simulation harness, then stop
-#   ./run.sh test -v   pass flags through to the harness (e.g. --verbose)
-#
-# The Ollama Cloud key is read from $OLLAMA_API_KEY, or prompted for if unset.
-# It lives only in this process's environment — it is never written to disk.
+#   ./run.sh test      run full key-free unittest discovery
 #
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -15,17 +11,26 @@ cd "$(dirname "$0")"
 PORT="${PORT:-8765}"
 URL="http://127.0.0.1:${PORT}"
 export PORT
+export APP_ENV="${APP_ENV:-development}"
+export PUBLIC_APP_URL="${PUBLIC_APP_URL:-$URL}"
+export EMAIL_BACKEND="${EMAIL_BACKEND:-memory}"
+export AUTH_PEPPER="${AUTH_PEPPER:-local-development-only-pepper-change-before-production}"
 
 command -v python3 >/dev/null || { echo "python3 not found — install it and re-run." >&2; exit 1; }
 
-# 1. key: from the environment, or prompt for it without echoing
-if [[ -z "${OLLAMA_API_KEY:-}" ]]; then
-  printf 'ollama cloud api key (hidden, not saved): '
-  read -rs OLLAMA_API_KEY || true
-  echo
-  export OLLAMA_API_KEY
+# Run a deterministic local adapter when no model key is present. Production
+# rejects this adapter in backend/config.py.
+if [[ -n "${OLLAMA_API_KEY:-}" ]]; then
+  export MODEL_BACKEND="${MODEL_BACKEND:-ollama}"
+else
+  export MODEL_BACKEND="${MODEL_BACKEND:-stub}"
 fi
-[[ -n "${OLLAMA_API_KEY:-}" ]] || { echo "no key given — get one at https://ollama.com, then re-run." >&2; exit 1; }
+
+# 1. key-free test mode
+if [[ "${1:-}" == "test" ]]; then
+  python3 -m unittest discover -s tests -p 'test_*.py' "${@:2}"
+  exit $?
+fi
 
 # 2. if a previous run still holds the port, stop it
 if lsof -ti "tcp:${PORT}" >/dev/null 2>&1; then
@@ -35,7 +40,7 @@ if lsof -ti "tcp:${PORT}" >/dev/null 2>&1; then
 fi
 
 # 3. start the server; always stop it again on exit
-echo "starting on ${URL}  (model ${TOOLKIT_MODEL:-glm-5.2})"
+echo "starting on ${URL}  (model backend ${MODEL_BACKEND})"
 python3 server.py &
 SERVER_PID=$!
 trap 'kill "${SERVER_PID}" 2>/dev/null || true' EXIT
@@ -46,13 +51,7 @@ for _ in $(seq 1 30); do
   sleep 0.3
 done
 
-# 5a. test mode: run the harness and exit with its status
-if [[ "${1:-}" == "test" ]]; then
-  set +e; python3 tests/simulate.py "${@:2}"; rc=$?; set -e
-  exit "${rc}"
-fi
-
-# 5b. normal mode: open the browser and stay up until ctrl-c
+# 5. open the browser and stay up until ctrl-c
 command -v open >/dev/null && open "${URL}" || echo "open ${URL} in your browser."
 echo "ready — press ctrl-c to stop."
 wait "${SERVER_PID}"

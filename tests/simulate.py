@@ -1,182 +1,347 @@
 #!/usr/bin/env python3
-"""Simulation test harness for the Non-Profit AI Toolkit prototype.
+"""Exercise the authenticated seven-stage API against a local development server.
 
-Replays scripted user runs against the LIVE app — the same `/api/chat` calls the
-browser makes — so each persona exercises the full sequence a real user would walk
-through in the browser at the URL in TOOLKIT_BASE_URL (or http://127.0.0.1:8765):
-
-    free-write -> strategic-fit interview -> Entry record -> Red Line Test
-
-Each step is checked against the invariants the app is supposed to hold. Because the
-model is live, replies vary run to run, so the checks are keyword-tolerant, not
-exact-match.
-
-Usage (start the server first, with OLLAMA_API_KEY set):
-    python3 tests/simulate.py                 # all personas
-    python3 tests/simulate.py --persona maple # one persona
-    python3 tests/simulate.py --verbose       # print fuller model replies
+The server must use EMAIL_BACKEND=memory. MODEL_BACKEND may be stub for a
+key-free run or ollama for a live model run. Verification still follows the
+ordinary token flow; the harness reads the loopback-only development outbox.
 """
-import argparse, json, os, sys, urllib.request
 
-BASE = os.environ.get("TOOLKIT_BASE_URL", "http://127.0.0.1:8765").rstrip("/")
+from __future__ import annotations
 
-def call(payload):
-    req = urllib.request.Request(BASE + "/api/chat", data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"})
-    return json.load(urllib.request.urlopen(req, timeout=120))
+import argparse
+import http.cookiejar
+import json
+import os
+import secrets
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
 
+APP = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(APP))
 
-def short(s, n=220):
-    return (s or "").strip().replace("\n", " / ")[:n]
-
-
-# reasoning-trace markers that must never appear in returned content (see
-# server.strip_reasoning) — GLM/DeepSeek <think>, Kimi ◁think▷, and variants
-REASONING_MARKERS = ("<think", "</think", "◁think▷", "◁/think▷", "<thinking", "</thinking")
-
-
-def leaks_reasoning(text):
-    low = (text or "").lower()
-    return any(m.lower() in low for m in REASONING_MARKERS)
+from backend.prompts import STAGE_LABELS, STAGE_ORDER, STAGE_SPECS
 
 
-# ---- personas: strategic-fit answers plus category-level Red Line Test answers ----
-PERSONAS = [
-    {
-        "id": "maple", "org": "Maple Community Center", "services": "",
-        "freewrite": ("After-school programs, a food pantry, and ESL classes. Staff answer the same "
-                      "eligibility questions for hours, intake notes are all on paper, and I worry "
-                      "about client privacy."),
-        "answers": ["Families and front-desk staff are affected by delayed answers.",
-                    "A good result would cut lookup time while keeping staff responsible for eligibility answers.",
-                    "About six staff use consumer chatbots occasionally; none are technical.",
-                    "The program director could own a review, and we would stop if client privacy could not be protected."],
-        "redlines": ["Participant names, contact details, household income ranges, and program eligibility categories.",
-                     "The intake team collects the information with service consent; external AI use was not covered.",
-                     "Staff must make every eligibility decision and families need a route to correct an answer.",
-                     "We have not completed an equity or accessibility review.",
-                     "The program director can stop the work, but no one has been assigned to audit it."],
-    },
-    {
-        "id": "harbor", "org": "Harbor Legal Aid",
-        "services": "- Eviction defense\n- Public-benefits appeals\n- Know-your-rights clinics",
-        "freewrite": ("We're a small legal-aid office drowning in intake. Lawyers repeat the same "
-                      "know-your-rights explanations every day. Everything we hold is confidential."),
-        "answers": ["Tenants and the lawyers who advise them are affected.",
-                    "A good result would help staff find approved explanations without treating them as legal advice.",
-                    "Two paralegals could maintain a narrow pilot, but staff AI knowledge varies.",
-                    "The supervising attorney would own it; confidential case facts must stay out."],
-        "redlines": ["Public know-your-rights materials and confidential case information are the two main categories.",
-                     "Clients did not consent to external AI processing of their case information.",
-                     "Lawyers must retain every legal judgment and clients need a route to reach counsel.",
-                     "The office has not tested language access or disability access.",
-                     "The supervising attorney can stop the work; a privacy lead still needs to review the boundary."],
-    },
-]
+DEFAULT_BASE = os.environ.get(
+    "TOOLKIT_BASE_URL", "http://127.0.0.1:8765"
+).rstrip("/")
+REASONING_MARKERS = (
+    "<think",
+    "</think",
+    "◁think▷",
+    "◁/think▷",
+    "<thinking",
+    "</thinking",
+)
+
+ANSWERS = {
+    "entry": (
+        "Staff spend hours finding approved public program information across several pages.",
+        "Program staff and community members looking for services would be affected.",
+        "A useful result would make approved information easier to find while staff retain authority.",
+        "The program director can own the review, and the work stops if private records enter the guide.",
+    ),
+    "redline": (
+        "The guide may use approved public pages; participant records and staff notes stay outside it.",
+        "Program staff own the public content and must approve changes before publication.",
+        "People retain every eligibility and service decision.",
+        "Community members need an accessible correction route through program staff.",
+        "The program director can suspend the guide when a boundary or approval fails.",
+    ),
+    "stress": (
+        "The guide could return outdated hours or unsupported eligibility information.",
+        "Every answer should link to an approved source and state when staff confirmation is needed.",
+        "The public site needs accessible navigation and a staff contact when the guide fails.",
+        "Program staff will review corrections and can return visitors to the existing website.",
+    ),
+    "cost_benefit": (
+        "Community members may find information faster, while staff spend less time repeating lookups.",
+        "Staff still need time to review sources, corrections, accessibility, and vendor changes.",
+        "A maintained search page is the main non-AI comparison.",
+        "The organization would compare findability, staff maintenance time, and correction requests.",
+    ),
+    "hidden_curriculum": (
+        "The guide could make published information appear more complete than staff knowledge.",
+        "Staff authority and community questions should remain visible in every pathway.",
+        "Unpublished knowledge and translation work could be excluded from the public sources.",
+        "The organization should review dependence on the provider and retain a usable website fallback.",
+    ),
+    "accountability": (
+        "The program director owns the guide, and communications staff own approved source changes.",
+        "Every answer should show its public source and a route to staff explanation.",
+        "Staff will record incidents, corrections, and unresolved questions.",
+        "A quarterly review can continue, revise, suspend, or retire the guide.",
+    ),
+    "internal_external_review": (
+        "Program staff, communications staff, and community members who use the site should review it.",
+        "The existing program and privacy leads provide internal approval.",
+        "A small participant review can test access, clarity, and correction routes.",
+        "The organization records conditions, dissent, owners, and the final human decision.",
+    ),
+}
+
+
+def short(text: str, limit: int = 180) -> str:
+    return " / ".join((text or "").strip().splitlines())[:limit]
+
+
+def leaks_reasoning(text: str) -> bool:
+    lowered = (text or "").casefold()
+    return any(marker.casefold() in lowered for marker in REASONING_MARKERS)
 
 
 class Checks:
     def __init__(self):
         self.passed = 0
-        self.failed = 0
-        self.fails = []
+        self.failed: list[str] = []
 
-    def ok(self, cond, label):
-        if cond:
+    def ok(self, condition: bool, label: str) -> None:
+        if condition:
             self.passed += 1
-            print("   ✓ " + label)
+            print(f"  ✓ {label}")
         else:
-            self.failed += 1
-            self.fails.append(label)
-            print("   ✗ " + label)
+            self.failed.append(label)
+            print(f"  ✗ {label}")
 
 
-def run_persona(p, chk, verbose):
-    print("\n=== persona: %s (%s) ===" % (p["org"], p["id"]))
-    org = {"name": p["org"], "services": p["services"]}
-    ctx = "org: %s. %s" % (p["org"], p["freewrite"])
-    hist = [{"role": "user", "content": ctx}]
-    print("  free-write: " + short(p["freewrite"]))
+class LocalClient:
+    def __init__(self, base_url: str):
+        parsed = urllib.parse.urlsplit(base_url)
+        if parsed.scheme != "http" or parsed.hostname not in {
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        }:
+            raise ValueError("The simulation runs only against a loopback HTTP server")
+        self.base = base_url.rstrip("/")
+        self.origin = f"{parsed.scheme}://{parsed.netloc}"
+        self.csrf = ""
+        cookies = http.cookiejar.CookieJar()
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(cookies)
+        )
 
-    # ---- adaptive interview: each answer should shape the next single question ----
-    routing = None
-    for i in range(5):
-        c = (call({"mode": "onboard", "messages": hist, "context": ctx}).get("content") or "")
-        chk.ok(bool(c), "interview turn %d returned content" % (i + 1))
-        chk.ok(not leaks_reasoning(c), "turn %d has no leaked reasoning tokens" % (i + 1))
-        if "→ step 1" in c.lower() or "→step 1" in c.lower():
-            routing = c
-            break
-        print("  Q%d: %s" % (i + 1, short(c, 300 if verbose else 160)))
-        chk.ok(c.count("?") <= 1, "turn %d asks one question, not a batch" % (i + 1))
-        ans = p["answers"][i] if i < len(p["answers"]) else "not sure — what do you suggest?"
-        hist += [{"role": "assistant", "content": c}, {"role": "user", "content": ans}]
-        ctx += "\n— " + ans
-    chk.ok(routing is not None, "interview reached a routing recommendation")
-    chk.ok(bool(routing) and "step 1" in routing.lower(), "routing names the next step")
-    if routing:
-        print("  ROUTE: " + short(routing, 300 if verbose else 200))
-
-    # ---- Strategic-fit Entry record ----
-    hist.append({"role": "user", "content": "Now write my Entry record and next test, exactly as instructed."})
-    est = (call({"mode": "estimate", "messages": hist, "context": ctx, "org": org}).get("content") or "")
-    print("  RECORD: " + short(est, 600 if verbose else 240))
-    chk.ok(not leaks_reasoning(est), "Entry record has no leaked reasoning tokens")
-    chk.ok("entry record" in est.lower(), "record has an 'Entry record' section")
-    chk.ok("decisions made" in est.lower(), "record separates decisions made")
-    chk.ok("next test" in est.lower(), "record names the next test")
-    ctx += "\n— Entry record: " + est
-
-    # ---- Step 1: adaptive Red Line Test ----
-    p_hist = [{"role": "user", "content": "Begin Step 1 using my Entry record. Ask exactly one Red Line Test question."}]
-    redline_record = None
-    for i in range(7):
-        a = (call({"mode": "redline", "messages": p_hist, "context": ctx, "org": org}).get("content") or "")
-        chk.ok(bool(a), "red-line turn %d returned content" % (i + 1))
-        chk.ok(not leaks_reasoning(a), "red-line turn %d has no leaked reasoning tokens" % (i + 1))
-        if "outcome:" in a.lower():
-            redline_record = a
-            break
-        print("  RED LINE Q%d: %s" % (i + 1, short(a, 300 if verbose else 160)))
-        chk.ok(a.count("?") <= 1, "red-line turn %d asks one question, not a batch" % (i + 1))
-        ans = p["redlines"][i] if i < len(p["redlines"]) else "The responsible owner has not decided that yet."
-        p_hist += [{"role": "assistant", "content": a}, {"role": "user", "content": ans}]
-        ctx += "\n— Step 1 response: " + ans
-    chk.ok(redline_record is not None, "Red Line Test reached a decision record")
-    if redline_record:
-        print("  RED LINE RECORD: " + short(redline_record, 600 if verbose else 240))
-        low = redline_record.lower()
-        chk.ok(all(w in low for w in ["data boundary", "human authority", "unknown"]),
-               "Red Line record carries boundaries, authority, and unknowns")
-        chk.ok(any(route in low for route in ["outcome: yes", "outcome: maybe", "outcome: no"]),
-               "Red Line record names one of the three routes")
-        if "fortune" not in p["org"].lower():
-            chk.ok("fortune" not in low, "no Fortune leakage in the Red Line record")
+    def request(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        body: dict | None = None,
+        idempotency_key: str | None = None,
+        timeout: int = 140,
+    ) -> dict:
+        headers = {"Accept": "application/json"}
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        if method not in {"GET", "HEAD", "OPTIONS"}:
+            headers["Origin"] = self.origin
+            if self.csrf:
+                headers["X-CSRF-Token"] = self.csrf
+            headers["Idempotency-Key"] = idempotency_key or str(uuid.uuid4())
+        request = urllib.request.Request(
+            self.base + path,
+            data=data,
+            headers=headers,
+            method=method,
+        )
+        try:
+            with self.opener.open(request, timeout=timeout) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as error:
+            raw = error.read()
+            try:
+                detail = json.loads(raw or b"{}").get("detail", "request failed")
+            except Exception:
+                detail = "request failed"
+            raise RuntimeError(f"{method} {path} returned {error.code}: {detail}") from error
+        return json.loads(raw or b"{}")
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--persona", help="run only this persona id")
-    ap.add_argument("--verbose", action="store_true")
-    args = ap.parse_args()
+def extract_fragment_token(link: str, expected_kind: str) -> str:
+    fragment = urllib.parse.urlsplit(link).fragment
+    kind, separator, query = fragment.partition("?")
+    if separator != "?" or kind != expected_kind:
+        raise RuntimeError("Development email contained an unexpected link")
+    token = urllib.parse.parse_qs(query).get("token", [""])[0]
+    if len(token) < 20:
+        raise RuntimeError("Development email token was missing")
+    return token
+
+
+def latest_assistant(payload: dict) -> str:
+    message = payload.get("message")
+    if isinstance(message, dict):
+        return str(message.get("content") or "")
+    messages = payload.get("messages") or []
+    for item in reversed(messages):
+        if item.get("role") == "assistant":
+            return str(item.get("content") or "")
+    return ""
+
+
+def run(base_url: str, verbose: bool) -> Checks:
+    client = LocalClient(base_url)
+    checks = Checks()
+
+    health = client.request("/health")
+    checks.ok(health.get("status") == "ok", "development server is healthy")
+    session = client.request("/api/auth/session")
+    client.csrf = str(session.get("csrf_token") or "")
+    checks.ok(bool(client.csrf), "pre-authentication CSRF token issued")
+
+    synthetic_email = f"toolkit-simulation-{uuid.uuid4().hex}@example.org"
+    synthetic_password = secrets.token_urlsafe(24)
+    client.request(
+        "/api/auth/register",
+        method="POST",
+        body={
+            "email": synthetic_email,
+            "password": synthetic_password,
+            "display_name": "Toolkit simulation",
+        },
+    )
+    outbox = client.request("/api/dev/outbox")
+    matching = [
+        message
+        for message in outbox.get("messages", [])
+        if message.get("to") == synthetic_email
+    ]
+    checks.ok(bool(matching), "verification email reached the local memory outbox")
+    if not matching:
+        return checks
+    verification_token = extract_fragment_token(matching[-1]["link"], "verify")
+    client.request(
+        "/api/auth/verify",
+        method="POST",
+        body={"token": verification_token},
+    )
+    login = client.request(
+        "/api/auth/login",
+        method="POST",
+        body={"email": synthetic_email, "password": synthetic_password},
+    )
+    client.csrf = str(login.get("csrf_token") or "")
+    checks.ok(
+        bool(login.get("authenticated"))
+        and bool((login.get("user") or {}).get("email_verified")),
+        "verified account signed in",
+    )
+
+    created = client.request(
+        "/api/records",
+        method="POST",
+        body={
+            "organization_name": "Synthetic Community Network",
+            "title": "Public information guide review",
+            "proposed_use": (
+                "A public information guide that helps visitors find approved program "
+                "information without using participant records."
+            ),
+        },
+    )
+    record = created.get("record") or {}
+    record_id = str(record.get("id") or "")
+    checks.ok(bool(record_id), "adoption record created")
+
+    for stage in STAGE_ORDER:
+        started = client.request(
+            f"/api/records/{record_id}/stages/{stage}/start",
+            method="POST",
+            body={},
+        )
+        opening = latest_assistant(started)
+        checks.ok(bool(opening), f"{STAGE_LABELS[stage]} opened with guidance")
+        checks.ok(
+            not leaks_reasoning(opening),
+            f"{STAGE_LABELS[stage]} opening contains no reasoning trace",
+        )
+        for index in range(STAGE_SPECS[stage]["answers"]):
+            key = str(uuid.uuid4())
+            reply = client.request(
+                f"/api/records/{record_id}/stages/{stage}/messages",
+                method="POST",
+                body={
+                    "content": ANSWERS[stage][index],
+                    "idempotency_key": key,
+                },
+                idempotency_key=key,
+            )
+            assistant = latest_assistant(reply)
+            checks.ok(bool(assistant), f"{STAGE_LABELS[stage]} response {index + 1} saved")
+            checks.ok(
+                not leaks_reasoning(assistant),
+                f"{STAGE_LABELS[stage]} response {index + 1} contains no reasoning trace",
+            )
+            if verbose:
+                print(f"    {short(assistant, 320)}")
+        completed = client.request(
+            f"/api/records/{record_id}/stages/{stage}/complete",
+            method="POST",
+            body={},
+        )
+        checks.ok(
+            completed.get("next_stage") is not None,
+            f"{STAGE_LABELS[stage]} completed",
+        )
+
+    generated = client.request(
+        f"/api/records/{record_id}/synthesis",
+        method="POST",
+        body={},
+    )
+    synthesis = generated.get("synthesis") or {}
+    concept_map = generated.get("concept_map") or {}
+    graph = concept_map.get("graph") or {}
+    nodes = graph.get("nodes") or []
+    checks.ok(bool(synthesis.get("summary")), "synthesis summary generated")
+    checks.ok(bool(nodes), "versioned concept map generated")
+
+    if nodes:
+        annotation = client.request(
+            f"/api/records/{record_id}/annotations",
+            method="POST",
+            body={
+                "concept_map_id": concept_map.get("id"),
+                "target_type": "node",
+                "target_id": nodes[0].get("id"),
+                "body": "Confirm this point with program and community reviewers.",
+            },
+        )
+        checks.ok(
+            bool((annotation.get("annotation") or {}).get("id")),
+            "concept-map annotation saved",
+        )
+
+    saved = (client.request(f"/api/records/{record_id}").get("record") or {})
+    checks.ok(len(saved.get("completed_steps") or []) == 7, "all seven stages persisted")
+    checks.ok(bool(saved.get("knowledge_snippets")), "knowledge snippets persisted")
+    checks.ok(bool(saved.get("annotations")), "saved annotation returned with the record")
+    client.request("/api/auth/logout", method="POST", body={})
+    return checks
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base-url", default=DEFAULT_BASE)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
     try:
-        urllib.request.urlopen(BASE + "/", timeout=5)
-    except Exception as e:
-        sys.exit("server not reachable on :8765 — start it first (%s)" % e)
+        checks = run(args.base_url.rstrip("/"), args.verbose)
+    except Exception as error:
+        sys.exit(f"simulation stopped: {error}")
 
-    chk = Checks()
-    for p in PERSONAS:
-        if args.persona and p["id"] != args.persona:
-            continue
-        run_persona(p, chk, args.verbose)
-
-    print("\n──────── %d passed · %d failed ────────" % (chk.passed, chk.failed))
-    if chk.fails:
-        print("failures:")
-        for f in chk.fails:
-            print("  - " + f)
-        sys.exit(1)
-    print("all simulated runs passed ✓")
+    print(f"\n{checks.passed} passed · {len(checks.failed)} failed")
+    if checks.failed:
+        for label in checks.failed:
+            print(f"  - {label}")
+        raise SystemExit(1)
+    print("authenticated seven-stage simulation passed")
 
 
 if __name__ == "__main__":

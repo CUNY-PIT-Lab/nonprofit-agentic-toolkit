@@ -1,0 +1,18 @@
+{
+  "name": "toolkit-agent-pi",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Non-Profit AI Toolkit — the governed agent: GLM-5.2 on Pi with Boryana's Genspace decision logic as a pre-flight guardrail.",
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test tests/*.test.ts",
+    "start": "./run.sh",
+    "demo": "./run.sh demo"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "typebox": "^1.3.3",
+    "tsx": "^4.19.2"
+  }
+}

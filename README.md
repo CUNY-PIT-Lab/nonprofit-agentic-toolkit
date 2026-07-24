@@ -1,60 +1,87 @@
-# Non-Profit AI Toolkit — entry screen + Red Line Test (live prototype)
+# Nonprofit AI toolkit
 
-The current prototype opens with an explanatory landing screen. Staff select **Begin the guided review** before reaching the **Strategic Fit entry screen**, followed by **Step 1, the Red Line Test**. It gathers a cumulative, in-session AI Adoption Record, asks one question at a time, and carries facts, negotiated conditions, owners, and unknowns into the next test. Users describe data categories and current practices only. They should never paste client records, names, identifying details, confidential text, or document uploads into the guide.
+The toolkit helps nonprofit staff examine a proposed use of AI before the organization commits to it. A guided conversation records context, constraints, evidence, owners, and open questions. Six review steps lead to a synthesis that connects the organization’s responses in an interactive concept map.
 
-The entry screen records the proposed use, mission or strategic-plan connection, people affected, current practice, desired outcome, non-AI option, staff capacity, accountable owner, and reasons to stop. The Red Line Test covers public, restricted, and sensitive data; ownership and consent; human decision authority; equity and access; audit and recourse; intellectual-property ownership; staff capacity; and the organization's ability to stop the work.
+A verified account is required. Staff can return to saved reviews, inspect the responses behind each map node, add annotations, and export the synthesis.
 
-The model drafts one of three routes from the supplied facts: **Proceed**, **Negotiate and return**, or **Walk Away**. The organization's responsible data, program, and governance owners decide. A Proceed decision unlocks the Stress Test. A negotiable condition keeps Step 1 open, and a Walk Away decision closes the proposal while preserving the reason.
+## The review
 
-The former application assistant is retired. Technical patterns such as an Infobot, document search, RAG, or local inference enter only after the organization has completed the six decision tests.
+The entry screen records the proposed use and current concerns. The guide then asks one question at a time through:
 
-A runnable browser prototype powered by **GLM-5.2** on Ollama Cloud. The model drafts each record and the interface gates progression.
+1. Red line test
+2. Stress test
+3. Costs and benefits
+4. Hidden curriculum
+5. Accountability
+6. Internal and external review
+7. Synthesis
 
-The hosted interface is at **https://zmuhls.github.io/nonprofit-agentic-toolkit/**. GitHub Pages serves `index.html`. The browser sends API requests to **https://toolkit-api-production-535d.up.railway.app**, where Railway runs `server.py` and keeps the Ollama key out of the browser.
+The synthesis reviews the full adoption record. It examines context, constraints, affordances, existing AI infrastructure, and four possible use patterns: workflow support; company-knowledge discovery and interpretation; a general-purpose chatbot; and a public information guide or website sidecar. It maps current conditions, decision points, pathways, potentials, and open questions.
 
-- **Entry screen · Strategic fit** — free-write followed by four adaptive questions and a draft Entry record.
-- **Step 1 · Red Line Test** — five adaptive questions, a draft Red Line record, one of three routes, and required review by responsible owners before the Stress Test.
+The interface renders the map with the self-hosted MIT-licensed Cytoscape.js library. Model claims and map elements remain tied to saved response identifiers.
 
-## Run
+## Saved work
+
+PostgreSQL stores:
+
+- verified users, sessions, organizations, and memberships
+- adoption records, stage conversations, and completed steps
+- model runs and response-based knowledge snippets
+- synthesis and concept-map versions
+- map annotations and audit events
+
+The browser receives an opaque host-only session cookie. Passwords use Argon2id. Email verification and password-reset tokens are single-use, hashed in the database, and placed in URL fragments so routine request logs do not receive them.
+
+## Local development
+
+Install the Python dependencies and start the same-origin app:
 
 ```bash
-export OLLAMA_API_KEY="<your ollama cloud key>"     # stays in the environment, never written to a file
-cd visualizations/toolkit-app
-python3 server.py                                   # → http://127.0.0.1:8765
+python3 -m pip install -r requirements.txt
+./run.sh
 ```
 
-Then open **http://127.0.0.1:8765**.
+Open `http://127.0.0.1:8765`. Local development uses SQLite, a deterministic model adapter when `OLLAMA_API_KEY` is absent, and an in-memory email outbox at `/api/dev/outbox`. Those adapters and the outbox are unavailable in production.
 
-- `server.py` proxies chat to `https://ollama.com/api/chat` (model `glm-5.2`). The browser never sees the key, and there's no CORS problem.
-- The key is read from the environment only — it is never committed, logged, or written to disk. Don't hardcode it here.
-- Needs **python3** (standard library only — no pip installs) and an Ollama Cloud key with GLM-5.2 access.
+Run the key-free checks:
 
-Override the port or model if you want: `PORT=9000 TOOLKIT_MODEL=glm-5.2 python3 server.py`.
+```bash
+./run.sh test
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
 
-## Railway
+## Pi concept-map tool
 
-`railway.json` sets the Railpack builder, `python3 server.py` start command, `/health` deployment check, and restart policy. The production service uses these environment variables:
+`pi-harness/` ships the governed Pi agent alongside the web app. It includes:
 
-- `OLLAMA_API_KEY` for Ollama Cloud; server-only and required for chat.
-- `ALLOWED_ORIGIN=https://zmuhls.github.io` for browser requests from GitHub Pages.
-- `TOOLKIT_MODEL=glm-5.2` and `HOST=0.0.0.0` for the runtime.
+- `src/concept-map.ts`, a harness-independent map builder
+- `.pi/extensions/concept-map.ts`, the `build_synthesis_concept_map` Pi tool
+- `.pi/skills/synthesis-concept-map/SKILL.md`, the agent skill
+- deterministic guardrail and map tests
 
-The server accepts cross-origin API requests only from the configured origin. `/health` returns a small key-free response for Railway's deployment check.
+The tool produces stable, annotatable node and edge identifiers that the web interface can render with Cytoscape.js.
 
-`/api/chat` has no access-code check. `ALLOWED_ORIGIN` limits which browser origin can read responses, but it does not authenticate direct HTTP clients. A public deployment can therefore consume the server's model quota.
+## Production
 
-## Reasoning tokens
+Railway runs FastAPI and PostgreSQL on the same private project network. The app serves its interface and API from one HTTPS origin.
 
-GLM-5.2 is a hybrid reasoning model. The request sets `think:false` and reads only `message.content` (never `message.thinking`); as a fallback for the case where the trace bleeds into `content` anyway, `strip_reasoning()` removes any `<think>…</think>` / `◁think▷…◁/think▷` block before the reply leaves the server, so reasoning never reaches the UI.
+Required variables:
 
-## Files
+- `APP_ENV=production`
+- `DATABASE_URL`, using the Railway PostgreSQL reference
+- `PUBLIC_APP_URL`, set to the canonical Railway HTTPS origin
+- `AUTH_PEPPER`, with at least 32 random characters
+- `MODEL_BACKEND=ollama`
+- `OLLAMA_API_KEY`
+- `TOOLKIT_MODEL=glm-5.2`
+- `EMAIL_BACKEND=resend`
+- `RESEND_API_KEY`
+- `MAIL_FROM`, using a verified sending domain
 
-| File | Role |
-|---|---|
-| `server.py` | Static server + `/api/chat` proxy; the per-stage system prompts, Pages CORS policy, health check, and `strip_reasoning()` live here. |
-| `index.html` | The landing page and wide conversation workspace (overview → strategic-fit interview → Red Line Test). |
-| `railway.json` | Railway start command, health check, and restart policy. |
-| `tests/test_strip.py` | Key-free unit tests for `strip_reasoning()`. |
-| `tests/simulate.py` | Live end-to-end harness (needs the server up + a key); guards against reasoning leaks. |
+Production startup stops when PostgreSQL, HTTPS, the authentication pepper, or the live model adapter is missing. Registration returns `503` until email delivery is ready. `/health` checks the database connection and reports whether account email is configured.
 
-The system prompts in `server.py` use the org name and cumulative in-session record. They separate organization-supplied facts from unknowns, forbid requests for raw sensitive material, and require responsible people to review the model's draft route.
+GitHub Pages remains a stable public entry URL and redirects to the canonical same-origin Railway app. Verification and reset fragments are preserved during that redirect; other fragments and query data are discarded.
+
+## Privacy boundary
+
+The guide asks for categories, policies, practices, and open questions. It does not ask for names, raw participant records, identifying details, confidential text, or uploads. Organization membership controls access to each saved review.
