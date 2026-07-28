@@ -1,5 +1,13 @@
 # Nonprofit AI toolkit
 
+<div align="center">
+
+**[▶ Live deployment — zmuhls.github.io/nonprofit-agentic-toolkit](https://zmuhls.github.io/nonprofit-agentic-toolkit/)**
+
+Built and deployed by [@zmuhls](https://github.com/zmuhls) · [CUNY AI Lab](https://github.com/CUNY-AI-Lab)
+
+</div>
+
 The toolkit helps nonprofit staff examine a proposed use of AI before the organization commits to it. A guided conversation records context, constraints, evidence, owners, and open questions. Six review steps lead to a synthesis that connects the organization’s responses in an interactive concept map.
 
 A verified account is required. Staff can return to saved reviews, inspect the responses behind each map node, add annotations, and export the synthesis.
