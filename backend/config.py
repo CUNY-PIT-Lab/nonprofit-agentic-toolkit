@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -29,6 +30,9 @@ class Settings:
     verification_hours: int
     reset_minutes: int
     test_mode: bool
+    telemetry_enabled: bool
+    telemetry_cohort: str
+    telemetry_min_cell_size: int
 
     @property
     def production(self) -> bool:
@@ -82,6 +86,9 @@ class Settings:
             raise RuntimeError("MODEL_BACKEND must be ollama or stub")
         if production and model_backend != "ollama":
             raise RuntimeError("MODEL_BACKEND=stub is unavailable in production")
+        telemetry_cohort = os.environ.get("TELEMETRY_COHORT", "beta").strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,119}", telemetry_cohort):
+            raise RuntimeError("TELEMETRY_COHORT must be a short categorical token")
         return cls(
             environment=environment,
             database_url=database_url,
@@ -103,4 +110,11 @@ class Settings:
             verification_hours=max(1, int(os.environ.get("VERIFICATION_HOURS", "24"))),
             reset_minutes=max(5, int(os.environ.get("RESET_MINUTES", "30"))),
             test_mode=_truthy(os.environ.get("TOOLKIT_TEST_MODE")),
+            telemetry_enabled=_truthy(
+                os.environ.get("PRODUCT_TELEMETRY_ENABLED")
+            ),
+            telemetry_cohort=telemetry_cohort,
+            telemetry_min_cell_size=max(
+                3, min(100, int(os.environ.get("TELEMETRY_MIN_CELL_SIZE", "3")))
+            ),
         )

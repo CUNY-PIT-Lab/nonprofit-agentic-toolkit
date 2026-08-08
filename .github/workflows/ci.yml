@@ -1,0 +1,186 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -p 'test_*.py'
+        env:
+          APP_ENV: test
+          PUBLIC_APP_URL: http://testserver
+          EMAIL_BACKEND: memory
+          MODEL_BACKEND: stub
+          AUTH_PEPPER: test-pepper-with-more-than-thirty-two-characters
+
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql://toolkit:toolkit@127.0.0.1:5432/toolkit_test
+      PUBLIC_APP_URL: http://testserver
+      EMAIL_BACKEND: memory
+      MODEL_BACKEND: stub
+      AUTH_PEPPER: test-pepper-with-more-than-thirty-two-characters
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: toolkit_test
+          POSTGRES_USER: toolkit
+          POSTGRES_PASSWORD: toolkit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U toolkit -d toolkit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Apply every migration twice
+        run: |
+          python -m backend.migrate
+          python -m backend.migrate
+      - name: Verify replay, pathway, evolution, and cycle guards
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          from backend.config import Settings
+
+          engine = create_engine(Settings.from_env().database_url)
+          expected_versions = {
+              "001_initial_auth_records_maps",
+              "002_turn_idempotency",
+              "003_stage_state_coverage",
+              "004_fieldwork_replay",
+              "005_versioned_pathways",
+              "006_governed_evolution",
+              "007_guided_stage_cycles",
+              "008_stable_telemetry_scope",
+          }
+          append_only_tables = {
+              "fieldwork_projects",
+              "fieldwork_cycles",
+              "fieldwork_branches",
+              "fieldwork_events",
+              "fieldwork_scope_versions",
+              "pathway_versions",
+              "pathway_facts",
+              "pathway_approvals",
+              "pathway_transitions",
+              "product_telemetry_events",
+              "product_telemetry_consents",
+              "evolution_proposals",
+              "evolution_reviews",
+              "evolution_rollout_actions",
+              "evolution_evaluations",
+          }
+          required_constraints = {
+              "ck_fieldwork_event_hashes",
+              "ck_pathway_transition_hashes",
+              "ck_product_telemetry_hashes",
+              "ck_product_telemetry_consent_scope",
+              "ck_turn_cycle_number",
+              "ck_stage_state_cycle_number",
+              "ck_completed_cycle_number",
+              "uq_turn_ordinal",
+              "uq_turn_idempotency",
+              "uq_stage_state",
+              "uq_completed_stage",
+              "uq_users_telemetry_scope_id",
+          }
+          with engine.connect() as connection:
+              versions = set(
+                  connection.execute(text("SELECT version FROM schema_migrations"))
+                  .scalars()
+                  .all()
+              )
+              assert expected_versions == versions, (expected_versions, versions)
+              trigger_rows = set(
+                  connection.execute(
+                      text(
+                          "SELECT c.relname, t.tgname "
+                          "FROM pg_trigger t "
+                          "JOIN pg_class c ON c.oid = t.tgrelid "
+                          "WHERE NOT t.tgisinternal"
+                      )
+                  ).all()
+              )
+              guarded_tables = {
+                  table
+                  for table, trigger in trigger_rows
+                  if trigger in {
+                      "fieldwork_append_only",
+                      "pathway_append_only",
+                      "evolution_append_only",
+                  }
+              }
+              assert append_only_tables <= guarded_tables, (
+                  append_only_tables - guarded_tables
+              )
+              assert (
+                  "fieldwork_events",
+                  "fieldwork_event_branch_guard",
+              ) in trigger_rows
+              constraints = set(
+                  connection.execute(
+                      text(
+                          "SELECT conname FROM pg_constraint "
+                          "WHERE conname = ANY(:names)"
+                      ),
+                      {"names": sorted(required_constraints)},
+                  ).scalars()
+              )
+              assert constraints == required_constraints, (
+                  required_constraints - constraints
+              )
+              cycle_columns = set(
+                  connection.execute(
+                      text(
+                          "SELECT table_name FROM information_schema.columns "
+                          "WHERE table_schema = 'public' "
+                          "AND column_name = 'cycle_number'"
+                      )
+                  ).scalars()
+              )
+              assert {
+                  "conversation_turns",
+                  "stage_states",
+                  "completed_steps",
+              } <= cycle_columns
+              telemetry_scope = connection.execute(
+                  text(
+                      "SELECT is_nullable, character_maximum_length "
+                      "FROM information_schema.columns "
+                      "WHERE table_schema = 'public' "
+                      "AND table_name = 'users' "
+                      "AND column_name = 'telemetry_scope_id'"
+                  )
+              ).one()
+              assert telemetry_scope == ("NO", 120), telemetry_scope
+          engine.dispose()
+          PY

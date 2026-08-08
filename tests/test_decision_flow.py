@@ -143,7 +143,14 @@ class AccountInterface(unittest.TestCase):
         self.assertNotIn("<style", INDEX)
         self.assertNotIn("<script>", INDEX)
         self.assertNotRegex(INDEX, r"\son[a-z]+=")
-        self.assertNotIn("'unsafe-inline'", BACKEND)
+        self.assertIn("style-src-elem 'self'", BACKEND)
+        self.assertIn(
+            "'sha256-pgvDUBa4IjFA2yuSJ2cqcyxmNYJMborsd0ORcRv9vw8='",
+            BACKEND,
+        )
+        self.assertNotIn("style-src-attr", BACKEND)
+        self.assertNotIn("script-src 'self' 'unsafe-inline'", BACKEND)
+        self.assertNotIn("style-src 'self' 'unsafe-inline'", BACKEND)
 
     def test_access_code_gate_is_absent(self):
         combined = INDEX + APP_JS + BACKEND
@@ -171,6 +178,16 @@ class ReviewAndSynthesisInterface(unittest.TestCase):
         self.assertRegex(APP_JS, r"/stages/\$\{[^}]+\}/complete")
         self.assertIn("idempotency_key", APP_JS)
         self.assertIn("crypto.randomUUID", APP_JS)
+
+    def test_revisited_stages_and_unguided_checkpoints_are_cycle_bound(self):
+        self.assertIn("function pinnedCycleForStage", APP_JS)
+        self.assertIn("turn.cycle_number", APP_JS)
+        self.assertIn("step.cycle_number", APP_JS)
+        self.assertIn("payload.cycle_number", APP_JS)
+        self.assertIn("/pathway/checkpoints", APP_JS)
+        self.assertNotIn("/pathway/facts", APP_JS)
+        self.assertIn("confirmed: true", APP_JS)
+        self.assertIn("await navigateToPathwayNode(nextNode)", APP_JS)
 
     def test_synthesis_workspace_has_analysis_map_and_annotation(self):
         for label in (

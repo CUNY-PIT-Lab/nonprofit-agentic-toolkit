@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="A guided review for nonprofit organizations deciding whether and how to use AI.">
   <title>Nonprofit AI toolkit</title>
-  <link rel="stylesheet" href="static/app.css?v=20260724-review-caret1">
+  <link rel="stylesheet" href="static/app.css?v=20260808-fieldwork-replay3">
   <script src="static/vendor/cytoscape.min.js?v=3.34.0" defer></script>
-  <script src="static/app.js?v=20260724-review-caret1" defer></script>
+  <script src="static/app.js?v=20260808-fieldwork-replay3" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to main content</a>
 
   <div id="siteShell">
     <header class="site-header">
-      <a class="wordmark" href="#intro" data-action="show-landing">Nonprofit AI toolkit</a>
+      <a class="wordmark" href="#intro" data-action="show-landing" data-product-name>Nonprofit AI toolkit</a>
       <nav class="site-nav" aria-label="Main navigation">
         <a href="#review">Review the steps</a>
         <button class="text-button" type="button" data-auth-open="login">Sign in</button>
@@ -99,7 +99,7 @@
   <div class="toolkit-shell" id="toolkitShell" hidden>
     <aside class="toolkit-sidebar" id="toolkitSidebar">
       <div class="toolkit-brand">
-        <button class="plain-button" type="button" data-action="show-landing">Nonprofit AI toolkit</button>
+        <button class="plain-button" type="button" data-action="show-landing" data-product-name>Nonprofit AI toolkit</button>
         <span id="recordName">Guided review</span>
       </div>
       <nav class="stage-navigation" id="stageNavigation" aria-label="Review progress"></nav>
@@ -152,6 +152,26 @@
           <span class="save-status" id="saveStatus" role="status" aria-live="polite">Saved</span>
         </header>
         <div class="conversation" id="conversation" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <section class="route-panel" id="routePanel" aria-labelledby="routePrompt" hidden>
+          <div class="route-meta">
+            <span id="routeDimension"></span>
+            <span id="coverageLabel" role="status"></span>
+          </div>
+          <p class="route-context" id="routeContext" hidden></p>
+          <h2 id="routePrompt">Continue the review</h2>
+          <div class="route-statement" id="routeStatement" hidden></div>
+          <dl class="route-conflict" id="routeConflict" hidden>
+            <div><dt>Earlier</dt><dd id="conflictEarlier"></dd></div>
+            <div><dt>Now</dt><dd id="conflictNow"></dd></div>
+          </dl>
+          <fieldset class="route-choices" id="routeChoices" hidden>
+            <legend>Choose one response</legend>
+            <div class="route-choice-list" id="routeChoiceList"></div>
+          </fieldset>
+          <div class="route-primary-actions" id="routePrimaryActions"></div>
+          <div class="route-quick-actions" id="routeQuickActions" aria-label="Other ways to answer"></div>
+          <p class="route-consequence" id="routeConsequence" hidden></p>
+        </section>
         <form class="composer" id="messageForm">
           <label class="sr-only" for="messageInput">Your response</label>
           <textarea id="messageInput" rows="3" maxlength="8000" placeholder="Your response…"></textarea>
@@ -160,10 +180,19 @@
             <button class="button" id="sendMessageButton" type="submit">Send response</button>
           </div>
         </form>
+        <section class="follow-up-panel" id="followUpPanel" aria-labelledby="followUpTitle" hidden>
+          <h2 id="followUpTitle">People and follow-up</h2>
+          <div id="delegationsList"></div>
+          <div id="reviewRoutingList"></div>
+        </section>
         <div class="completion-panel" id="completionPanel" hidden>
           <div>
             <strong>Review this step</strong>
             <p id="completionSummary">The guide has enough information to draft this part of the record.</p>
+            <div class="stage-record-review" id="stageRecordReview" hidden>
+              <label for="stageRecordText">Draft stage record</label>
+              <textarea id="stageRecordText" rows="9" maxlength="30000"></textarea>
+            </div>
           </div>
           <button class="button" id="completeStageButton" type="button">Complete this step</button>
         </div>
@@ -242,8 +271,238 @@
           </aside>
         </div>
       </section>
+
+      <section class="stage-screen fieldwork-screen" id="fieldworkStage" aria-labelledby="fieldworkTitle" hidden>
+        <header class="fieldwork-header">
+          <div>
+            <p class="stage-kicker">Replayable fieldwork</p>
+            <h1 id="fieldworkTitle">Fieldwork cycles</h1>
+            <p class="stage-intro">Record observations and reflexive notes as append-only evidence, then replay the canonical record at a selected scale or point in its history.</p>
+          </div>
+          <span class="replay-badge" id="fieldworkReplayBadge">Stored exact projection</span>
+        </header>
+
+        <div class="fieldwork-grid">
+          <section class="fieldwork-card" aria-labelledby="cycleWorkspaceTitle">
+            <div class="fieldwork-card-header">
+              <div>
+                <p class="eyebrow">Iterative cycles</p>
+                <h2 id="cycleWorkspaceTitle">Cycle workspace</h2>
+              </div>
+              <button class="button button-secondary" id="refreshFieldworkButton" type="button">Refresh</button>
+            </div>
+
+            <form class="compact-form" id="fieldworkCycleForm">
+              <label for="fieldworkCycleLabel">Open a new cycle</label>
+              <div class="inline-form-row">
+                <input id="fieldworkCycleLabel" name="label" type="text" maxlength="240" placeholder="Cycle label" required>
+                <button class="button" type="submit">Create cycle</button>
+              </div>
+            </form>
+
+            <div class="fieldwork-cycle-select">
+              <label for="fieldworkCycleSelect">Current cycle</label>
+              <select id="fieldworkCycleSelect" disabled>
+                <option value="">Create a cycle to begin</option>
+              </select>
+            </div>
+
+            <form class="fieldwork-entry-form" id="fieldworkEntryForm">
+              <div class="fieldwork-form-grid">
+                <div>
+                  <label for="fieldworkEntryType">Entry type</label>
+                  <select id="fieldworkEntryType" required disabled>
+                    <option value="observations">Observation</option>
+                    <option value="reflexive-memos">Reflexive memo</option>
+                    <option value="positionality-memos">Positionality memo</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="fieldworkObservedAt">Observed at</label>
+                  <input id="fieldworkObservedAt" type="datetime-local" required disabled>
+                </div>
+              </div>
+              <label for="fieldworkEntryContent">Fieldnote</label>
+              <textarea id="fieldworkEntryContent" rows="7" maxlength="30000" placeholder="Record what was observed, then distinguish interpretation in a later entry…" required disabled></textarea>
+              <p class="field-help">Do not enter participant accounts here. Participant accounts require an explicit consent subject and consent basis, so this workspace intentionally omits that entry type.</p>
+              <button class="button" id="appendFieldworkButton" type="submit" disabled>Append to the ledger</button>
+            </form>
+          </section>
+
+          <section class="fieldwork-card replay-card" aria-labelledby="replayWorkspaceTitle">
+            <div class="fieldwork-card-header">
+              <div>
+                <p class="eyebrow">Canonical replay</p>
+                <h2 id="replayWorkspaceTitle">Replay state</h2>
+              </div>
+              <span class="fieldwork-hash" id="fieldworkStateHash">No replay yet</span>
+            </div>
+            <form class="replay-controls" id="fieldworkReplayForm">
+              <div>
+                <label for="fieldworkScale">Scale</label>
+                <select id="fieldworkScale" disabled>
+                  <option value="organization">Organization</option>
+                  <option value="program">Program</option>
+                  <option value="site">Site</option>
+                  <option value="team">Team</option>
+                  <option value="participant">Participant</option>
+                  <option value="case">Case</option>
+                  <option value="encounter">Encounter</option>
+                </select>
+              </div>
+              <div>
+                <label for="fieldworkAsOf">As of</label>
+                <select id="fieldworkAsOf" disabled>
+                  <option value="">Latest canonical state</option>
+                </select>
+              </div>
+              <button class="button button-secondary" id="replayFieldworkButton" type="submit" disabled>Replay</button>
+            </form>
+            <p class="replay-explainer" id="fieldworkReplayExplainer">Stored exact replays reproduce the authorized ledger projection. Counterfactual branches are simulation-only and never overwrite canonical evidence.</p>
+            <div class="fieldwork-empty" id="fieldworkEmptyState">
+              <p>Create or select a cycle to inspect its event history.</p>
+            </div>
+            <ol class="fieldwork-timeline" id="fieldworkTimeline" aria-label="Fieldwork event timeline"></ol>
+            <section class="fieldwork-outputs" id="fieldworkOutputs" aria-labelledby="fieldworkOutputsTitle" hidden>
+              <h3 id="fieldworkOutputsTitle">Stored exact outputs</h3>
+              <ul id="fieldworkOutputList"></ul>
+            </section>
+            <p class="form-status" id="fieldworkStatus" role="status" aria-live="polite"></p>
+          </section>
+        </div>
+
+        <div class="fieldwork-extension-grid">
+          <section class="sidecar-card" aria-labelledby="sidecarTitle">
+            <header class="sidecar-header">
+              <div>
+                <p class="eyebrow">Authorized context sidecar</p>
+                <h2 id="sidecarTitle">Ask an informational sidecar</h2>
+              </div>
+              <div class="sidecar-boundaries" aria-label="Sidecar boundaries">
+                <span>Informational</span>
+                <span>Not saved</span>
+                <span>Cannot change record</span>
+              </div>
+            </header>
+            <p class="sidecar-contract">Informational only. This chat is not saved and cannot change the record. It can explain the authorized projection for the selected canonical cycle and scale.</p>
+            <p class="sidecar-selection" id="sidecarSelection">Select a fieldwork cycle to begin.</p>
+            <div class="sidecar-log" id="sidecarLog" role="log" aria-live="polite" aria-relevant="additions">
+              <p class="sidecar-empty" id="sidecarEmpty">No ephemeral messages yet.</p>
+            </div>
+            <form class="sidecar-form" id="sidecarForm">
+              <label for="sidecarInput">Ask about authorized fieldwork context</label>
+              <textarea id="sidecarInput" rows="4" maxlength="8000" placeholder="Ask for a summary, comparison, uncertainty, or question to bring back to the organization…" required disabled></textarea>
+              <div class="sidecar-form-footer">
+                <button class="text-button" id="clearSidecarButton" type="button" disabled>Clear ephemeral chat</button>
+                <button class="button" id="sendSidecarButton" type="submit" disabled>Ask sidecar</button>
+              </div>
+            </form>
+            <details class="sidecar-provenance" id="sidecarProvenance" hidden>
+              <summary>Authorized citations and response provenance</summary>
+              <dl>
+                <div><dt>Context hash</dt><dd><code id="sidecarContextHash">—</code></dd></div>
+                <div><dt>Model version</dt><dd id="sidecarModelVersion">—</dd></div>
+              </dl>
+              <div class="sidecar-citations">
+                <section aria-labelledby="sidecarEventCitationsTitle">
+                  <h3 id="sidecarEventCitationsTitle">Event citations</h3>
+                  <ul id="sidecarEventCitations"></ul>
+                </section>
+                <section aria-labelledby="sidecarSourceCitationsTitle">
+                  <h3 id="sidecarSourceCitationsTitle">Source citations</h3>
+                  <ul id="sidecarSourceCitations"></ul>
+                </section>
+              </div>
+            </details>
+            <p class="form-status" id="sidecarStatus" role="status" aria-live="polite"></p>
+          </section>
+
+          <aside class="evolution-card" aria-labelledby="evolutionTitle">
+            <p class="eyebrow">Voluntary improvement</p>
+            <h2 id="evolutionTitle">Help improve the toolkit</h2>
+            <p>Opt in to bounded, categorical product signals. Signals never include chat messages, fieldnotes, participant information, decision rationales, or record content.</p>
+            <div class="consent-control">
+              <input id="evolutionConsent" type="checkbox" disabled>
+              <label for="evolutionConsent">Share bounded product-improvement signals</label>
+            </div>
+            <p class="field-help" id="evolutionConsentHelp">Checking consent availability…</p>
+            <div class="name-preference" id="namePreference" hidden>
+              <h3>Which name better fits this evolving work?</h3>
+              <div class="name-preference-actions">
+                <button class="button button-secondary" type="button" data-evolution-signal="name.preference.fieldwork_loop">Fieldwork Loop</button>
+                <button class="button button-secondary" type="button" data-evolution-signal="name.preference.current_toolkit">Keep <span data-product-name>Nonprofit AI toolkit</span></button>
+              </div>
+              <p>Your selection records only the categorical preference shown on the button.</p>
+            </div>
+            <p class="form-status" id="evolutionStatus" role="status" aria-live="polite"></p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="stage-screen pathway-destination" id="pathwayDestination" aria-labelledby="pathwayDestinationTitle" hidden>
+        <p class="stage-kicker">Pathway outcome</p>
+        <h1 id="pathwayDestinationTitle">Pathway updated</h1>
+        <p class="stage-intro" id="pathwayDestinationCopy"></p>
+        <div class="destination-actions">
+          <button class="button button-secondary" type="button" data-action="open-fieldwork">Open fieldwork cycles</button>
+          <button class="button button-secondary" type="button" data-action="records">Saved reviews</button>
+        </div>
+      </section>
+
+      <section class="pathway-panel" id="pathwayPanel" aria-labelledby="pathwayTitle" tabindex="-1" hidden>
+        <header class="pathway-header">
+          <div>
+            <p class="eyebrow">Versioned decision pathway</p>
+            <h2 id="pathwayTitle">Choose what happens next</h2>
+            <p id="pathwayPrompt">The model can draft a route. The organization records the decision and its rationale.</p>
+          </div>
+          <dl class="pathway-metadata" aria-label="Pinned pathway version">
+            <div><dt>Node</dt><dd id="pathwayCurrentNode">—</dd></div>
+            <div><dt>Version</dt><dd id="pathwayVersion">—</dd></div>
+            <div><dt>Cycle</dt><dd id="pathwayCycle">—</dd></div>
+            <div><dt>Checksum</dt><dd><code id="pathwayChecksum">—</code></dd></div>
+          </dl>
+        </header>
+        <form class="pathway-decision-form" id="pathwayDecisionForm">
+          <label for="pathwayRationale">Decision rationale</label>
+          <textarea id="pathwayRationale" rows="4" minlength="8" maxlength="4000" placeholder="Record why this route is appropriate, who decided, and what would prompt a return…" required></textarea>
+          <fieldset class="pathway-choices" id="pathwayChoices">
+            <legend>Organization decision</legend>
+            <button class="pathway-choice pathway-proceed" type="submit" data-pathway-outcome="proceed">
+              <strong>Proceed</strong><small>Confirm readiness and move to the next pathway node.</small>
+            </button>
+            <button class="pathway-choice" type="submit" data-pathway-outcome="negotiate_return">
+              <strong>Negotiate and return</strong><small>Keep this node open while conditions or evidence change.</small>
+            </button>
+            <button class="pathway-choice" type="submit" data-pathway-outcome="pause">
+              <strong>Pause</strong><small>Stop active progression without closing the record.</small>
+            </button>
+            <button class="pathway-choice" type="submit" data-pathway-outcome="non_ai">
+              <strong>Take a non-AI route</strong><small>Continue the organizational work without deploying AI.</small>
+            </button>
+            <button class="pathway-choice pathway-stop" type="submit" data-pathway-outcome="walk_away">
+              <strong>Walk away</strong><small>Close this proposal as a legitimate governance outcome.</small>
+            </button>
+          </fieldset>
+          <p class="form-status" id="pathwayStatus" role="status" aria-live="polite"></p>
+        </form>
+        <details class="pathway-history">
+          <summary>Decision history <span id="pathwayDecisionCount">0</span></summary>
+          <ol id="pathwayDecisionHistory"></ol>
+        </details>
+      </section>
     </main>
   </div>
+
+  <dialog class="pathway-confirm-dialog" id="pathwayConfirmDialog" aria-labelledby="pathwayConfirmTitle">
+    <p class="eyebrow">Confirm organizational decision</p>
+    <h2 id="pathwayConfirmTitle">Confirm this route</h2>
+    <p id="pathwayConfirmCopy"></p>
+    <div class="dialog-actions">
+      <button class="button button-secondary" id="cancelPathwayDecisionButton" type="button">Return to the record</button>
+      <button class="button" id="confirmPathwayDecisionButton" type="button">Confirm decision</button>
+    </div>
+  </dialog>
 
   <dialog class="auth-dialog" id="authDialog" aria-label="Account">
     <button class="dialog-close" type="button" data-action="close-auth" aria-label="Close">×</button>

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -28,6 +29,10 @@ def uuid4str() -> str:
     return str(uuid.uuid4())
 
 
+def new_telemetry_scope_id() -> str:
+    return f"scope.{uuid.uuid4()}"
+
+
 JSON_DOCUMENT = JSON().with_variant(JSONB, "postgresql")
 
 
@@ -38,6 +43,11 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4str)
+    # This random, persisted pseudonym binds telemetry consent across process
+    # restarts and auth-secret rotation. It is deliberately never serialized.
+    telemetry_scope_id: Mapped[str] = mapped_column(
+        String(120), nullable=False, default=new_telemetry_scope_id
+    )
     email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(120))
@@ -48,6 +58,12 @@ class User(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "telemetry_scope_id", name="uq_users_telemetry_scope_id"
+        ),
     )
 
 
@@ -159,6 +175,7 @@ class ConversationTurn(Base):
         ForeignKey("adoption_records.id", ondelete="CASCADE"), nullable=False
     )
     stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    cycle_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -171,14 +188,77 @@ class ConversationTurn(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("record_id", "stage", "ordinal", name="uq_turn_ordinal"),
+        CheckConstraint("cycle_number >= 1", name="ck_turn_cycle_number"),
         UniqueConstraint(
             "record_id",
             "stage",
+            "cycle_number",
+            "ordinal",
+            name="uq_turn_ordinal",
+        ),
+        UniqueConstraint(
+            "record_id",
+            "stage",
+            "cycle_number",
             "idempotency_key",
             name="uq_turn_idempotency",
         ),
-        Index("ix_turns_record_stage", "record_id", "stage", "ordinal"),
+        Index(
+            "ix_turns_record_stage",
+            "record_id",
+            "stage",
+            "cycle_number",
+            "ordinal",
+        ),
+    )
+
+
+class StageState(Base):
+    """Structured, server-owned state for one stage of one review.
+
+    Coverage replaces answer counts. Every list holds short, extracted claims
+    that keep their provenance, so the working record, the concept map, and the
+    synthesis can read structured state instead of re-reading conversation text.
+    """
+
+    __tablename__ = "stage_states"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4str)
+    record_id: Mapped[str] = mapped_column(
+        ForeignKey("adoption_records.id", ondelete="CASCADE"), nullable=False
+    )
+    stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    cycle_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="in_progress")
+    coverage: Mapped[dict] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    facts: Mapped[list] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
+    open_questions: Mapped[list] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    contradictions: Mapped[list] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    blockers: Mapped[list] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
+    owners: Mapped[list] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
+    delegations: Mapped[list] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list
+    )
+    signals: Mapped[dict] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    next_action: Mapped[dict] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        CheckConstraint("cycle_number >= 1", name="ck_stage_state_cycle_number"),
+        UniqueConstraint(
+            "record_id", "stage", "cycle_number", name="uq_stage_state"
+        ),
+        Index("ix_stage_states_record", "record_id", "stage", "cycle_number"),
     )
 
 
@@ -189,6 +269,7 @@ class CompletedStep(Base):
         ForeignKey("adoption_records.id", ondelete="CASCADE"), nullable=False
     )
     stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    cycle_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     record_text: Mapped[str] = mapped_column(Text, nullable=False)
     completed_by_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -198,8 +279,16 @@ class CompletedStep(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("record_id", "stage", name="uq_completed_stage"),
-        Index("ix_completed_record", "record_id", "completed_at"),
+        CheckConstraint("cycle_number >= 1", name="ck_completed_cycle_number"),
+        UniqueConstraint(
+            "record_id", "stage", "cycle_number", name="uq_completed_stage"
+        ),
+        Index(
+            "ix_completed_record",
+            "record_id",
+            "cycle_number",
+            "completed_at",
+        ),
     )
 
 

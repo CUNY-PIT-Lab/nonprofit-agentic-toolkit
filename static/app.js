@@ -8,52 +8,45 @@ if (window.location.hostname === "zmuhls.github.io") {
   window.location.replace(canonical + safeFragment);
 }
 
-const STAGES = [
+const FALLBACK_STAGES = [
   {
     key: "entry",
-    answers: 4,
     label: "Describe the proposal",
     shortLabel: "Describe the proposal",
     intro: "The guide uses your initial description, then asks one question at a time about purpose, current practice, affected people, ownership, capacity, and reasons to stop."
   },
   {
     key: "redline",
-    answers: 5,
     label: "Red line test",
     shortLabel: "Red line test",
     intro: "Set conditions for privacy, consent, human authority, equity, audit, ownership, and organizational capacity."
   },
   {
     key: "stress",
-    answers: 4,
     label: "Stress test",
     shortLabel: "Stress test",
     intro: "Examine failure, unsupported output, security, reliability, accessibility, correction, and recourse."
   },
   {
     key: "cost_benefit",
-    answers: 4,
     label: "Costs and benefits",
     shortLabel: "Costs and benefits",
     intro: "Compare who benefits, labor, risk, resources, maintenance, and a credible non-AI option."
   },
   {
     key: "hidden_curriculum",
-    answers: 4,
     label: "Hidden curriculum",
     shortLabel: "Hidden curriculum",
     intro: "Review what the proposal changes about values, behavior, authority, knowledge, invisible work, and dependence."
   },
   {
     key: "accountability",
-    answers: 4,
     label: "Accountability",
     shortLabel: "Accountability",
     intro: "Identify who explains, audits, hears appeals, handles incidents, suspends the system, reviews it, and retires it."
   },
   {
     key: "internal_external_review",
-    answers: 4,
     label: "Internal and external review",
     shortLabel: "Internal and external review",
     intro: "Bring affected staff, participants, existing advisory groups, governance groups, and approvers into the decision."
@@ -66,6 +59,8 @@ const STAGES = [
   }
 ];
 
+let STAGES = FALLBACK_STAGES.map((stage) => ({ ...stage }));
+
 const ANALYSIS_LABELS = {
   context: "Context",
   constraints: "Constraints",
@@ -73,6 +68,67 @@ const ANALYSIS_LABELS = {
   infrastructure: "Existing AI infrastructure",
   use_patterns: "Targeted use patterns"
 };
+
+const INTERFACE_STATES = new Set([
+  "ask",
+  "choose",
+  "confirm",
+  "classify",
+  "resolve_conflict",
+  "delegate",
+  "record_unknown",
+  "review_stage",
+  "complete_stage",
+  "stop_route"
+]);
+
+const QUICK_ACTION_LABELS = {
+  unknown: "I don’t know yet",
+  delegate: "Ask someone else",
+  not_applicable: "Not applicable"
+};
+
+const PATHWAY_OUTCOMES = {
+  proceed: {
+    label: "Proceed",
+    detail: "Confirm readiness and move to the next pathway node."
+  },
+  negotiate_return: {
+    label: "Negotiate and return",
+    detail: "Keep this node open while conditions or evidence change."
+  },
+  pause: {
+    label: "Pause",
+    detail: "Stop active progression without closing the record."
+  },
+  resume: {
+    label: "Resume",
+    detail: "Resume active review at this pathway node."
+  },
+  non_ai: {
+    label: "Take a non-AI route",
+    detail: "Continue the organizational work without deploying AI."
+  },
+  walk_away: {
+    label: "Walk away",
+    detail: "Close this proposal as a legitimate governance outcome."
+  },
+  reassess: {
+    label: "Return for reassessment",
+    detail: "Bring monitoring evidence back into internal and external review."
+  },
+  retire: {
+    label: "Retire",
+    detail: "Retire the system and preserve the decision record."
+  },
+  review: {
+    label: "Return to review",
+    detail: "Route the record back through organizational review."
+  }
+};
+
+const TERMINAL_PATHWAY_NODES = new Set(["non_ai", "walked_away", "retired"]);
+const UNGUIDED_PATHWAY_NODES = new Set(["synthesis", "pilot", "monitoring"]);
 
 const state = {
   csrfToken: "",
@@ -84,8 +140,21 @@ const state = {
   cy: null,
   selectedNodeId: "",
   annotations: {},
+  pathway: null,
+  pendingPathwayDecision: null,
+  currentView: "record",
+  fieldworkCycles: [],
+  fieldworkReplay: null,
+  fieldworkEventOptions: [],
+  sidecarHistory: [],
+  sidecarRecordId: "",
+  sidecarSelectionKey: "",
+  evolutionConsent: "not_set",
+  evolutionCollectionEnabled: false,
+  namePreference: "",
   authEmail: "",
   resetToken: "",
+  currentInterface: null,
   inflight: false,
   toastTimer: null
 };
@@ -93,6 +162,24 @@ const state = {
 const byId = (id) => document.getElementById(id);
 const firstValue = (...values) => values.find((value) => value !== undefined && value !== null);
 const asArray = (value) => Array.isArray(value) ? value : value ? [value] : [];
+
+async function loadProductIdentity() {
+  try {
+    const payload = await api.request("/api/product-evolution/identity");
+    const displayName = String(firstValue(payload.display_name, ""))
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120);
+    if (!displayName) return;
+    document.title = displayName;
+    document.querySelectorAll("[data-product-name]").forEach((element) => {
+      element.textContent = displayName;
+    });
+  } catch (_error) {
+    // Naming is governed server-side; older deployments keep the bundled name.
+  }
+}
 
 class ApiError extends Error {
   constructor(message, status, code, details) {
@@ -144,6 +231,48 @@ const api = {
     return payload;
   }
 };
+
+function reviewStageCount() {
+  const index = STAGES.findIndex((stage) => stage.key === "synthesis");
+  return index >= 0 ? index : STAGES.length;
+}
+
+function synthesisStageIndex() {
+  const index = STAGES.findIndex((stage) => stage.key === "synthesis");
+  return index >= 0 ? index : STAGES.length - 1;
+}
+
+function stageDefinition(index = state.currentStage) {
+  return STAGES[index] || STAGES[0];
+}
+
+async function loadStageDefinitions() {
+  try {
+    const payload = await api.request("/api/stages");
+    const seen = new Set();
+    const definitions = asArray(payload.stages).flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const key = String(firstValue(item.id, item.key, "")).trim();
+      const label = String(firstValue(item.label, "")).trim();
+      if (!/^[a-z][a-z0-9_]{0,59}$/.test(key) || !label || key === "synthesis" || seen.has(key)) return [];
+      seen.add(key);
+      return [{
+        key,
+        label,
+        shortLabel: String(firstValue(item.short_label, label)),
+        intro: String(firstValue(item.purpose, item.intro, "")),
+        dimensions: asArray(item.dimensions)
+      }];
+    });
+    if (definitions.length) {
+      const synthesis = FALLBACK_STAGES.find((stage) => stage.key === "synthesis");
+      STAGES = [...definitions, { ...synthesis }];
+    }
+  } catch (_error) {
+    // Older deployments do not expose the dynamic stage contract yet.
+    STAGES = FALLBACK_STAGES.map((stage) => ({ ...stage }));
+  }
+}
 
 function makeRequestId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
@@ -446,8 +575,10 @@ async function openToolkit() {
         ? { ...state.record.synthesis, concept_map: state.record.concept_map }
         : null;
       loadRecordAnnotations();
+      await loadPathway();
       renderNavigation();
-      await selectStage(nextRecordStage(state.record), false);
+      if (state.pathway) await navigateToPathwayNode(currentPathwayNode());
+      else await selectStage(nextRecordStage(state.record), false);
     } catch (error) {
       showToast(error.message);
       showRecordHome();
@@ -475,6 +606,14 @@ async function logout() {
   state.record = null;
   state.records = [];
   state.synthesis = null;
+  state.pathway = null;
+  state.fieldworkCycles = [];
+  state.fieldworkReplay = null;
+  state.sidecarHistory = [];
+  state.sidecarRecordId = "";
+  state.sidecarSelectionKey = "";
+  state.evolutionConsent = "not_set";
+  state.evolutionCollectionEnabled = false;
   if (state.cy) state.cy.destroy();
   state.cy = null;
   showLanding();
@@ -490,6 +629,165 @@ function conceptMapId() {
     state.record && state.record.concept_map && state.record.concept_map.id,
     ""
   ));
+}
+
+function pathwayState(payload) {
+  const value = firstValue(payload && payload.pathway, payload);
+  return value && typeof value === "object" && value.run ? value : null;
+}
+
+function currentPathwayNode() {
+  return String(firstValue(state.pathway && state.pathway.run && state.pathway.run.current_node, ""));
+}
+
+function pathwayNodeLabel(nodeId = currentPathwayNode()) {
+  const nodes = firstValue(state.pathway && state.pathway.definition && state.pathway.definition.nodes, {});
+  return String(firstValue(nodes && nodes[nodeId] && nodes[nodeId].label, nodeId.replaceAll("_", " "), "Pathway"));
+}
+
+async function loadPathway(initializeIfMissing = true) {
+  if (!recordId()) {
+    state.pathway = null;
+    renderPathwayPanel();
+    return null;
+  }
+  const path = `/api/records/${encodeURIComponent(recordId())}/pathway`;
+  try {
+    const payload = await api.request(path);
+    state.pathway = pathwayState(payload);
+  } catch (error) {
+    if (error.status !== 404 || !initializeIfMissing) {
+      state.pathway = null;
+      renderPathwayPanel(error.message);
+      return null;
+    }
+    try {
+      const payload = await api.request(path, {
+        method: "POST",
+        body: { entry_role: "author" }
+      });
+      state.pathway = pathwayState(payload);
+    } catch (initializeError) {
+      state.pathway = null;
+      renderPathwayPanel(initializeError.message);
+      return null;
+    }
+  }
+  renderPathwayPanel();
+  return state.pathway;
+}
+
+function pathwayEdgesForCurrentNode() {
+  const node = currentPathwayNode();
+  return asArray(state.pathway && state.pathway.definition && state.pathway.definition.edges)
+    .filter((edge) => String(edge && edge.from) === node);
+}
+
+function renderPathwayDecisionHistory() {
+  const decisions = asArray(state.pathway && state.pathway.decisions);
+  const list = byId("pathwayDecisionHistory");
+  list.replaceChildren();
+  byId("pathwayDecisionCount").textContent = String(decisions.length);
+  if (!decisions.length) {
+    const empty = document.createElement("li");
+    empty.className = "pathway-history-empty";
+    empty.textContent = "No pathway decisions have been committed yet.";
+    list.appendChild(empty);
+    return;
+  }
+  decisions.slice().reverse().forEach((decision) => {
+    const item = document.createElement("li");
+    const heading = document.createElement("strong");
+    const outcome = PATHWAY_OUTCOMES[String(decision.outcome)] || {};
+    heading.textContent = `${firstValue(outcome.label, String(decision.outcome).replaceAll("_", " "))}: ${pathwayNodeLabel(String(decision.from_node))} → ${pathwayNodeLabel(String(decision.to_node))}`;
+    const rationale = document.createElement("p");
+    rationale.textContent = String(firstValue(decision.rationale, "No rationale recorded."));
+    const meta = document.createElement("small");
+    const timestamp = decision.decided_at ? new Date(decision.decided_at) : null;
+    meta.textContent = [
+      `Decision ${firstValue(decision.sequence, "")}`,
+      timestamp && !Number.isNaN(timestamp.getTime()) ? timestamp.toLocaleString() : "",
+      decision.decision_hash ? `hash ${String(decision.decision_hash).slice(0, 12)}` : ""
+    ].filter(Boolean).join(" · ");
+    item.append(heading, rationale, meta);
+    list.appendChild(item);
+  });
+}
+
+function appendDynamicPathwayChoice(outcome) {
+  const spec = PATHWAY_OUTCOMES[outcome];
+  if (!spec || byId("pathwayChoices").querySelector(`[data-pathway-outcome="${outcome}"]`)) return;
+  const button = document.createElement("button");
+  button.type = "submit";
+  button.className = `pathway-choice pathway-choice-dynamic${outcome === "retire" ? " pathway-stop" : ""}`;
+  button.dataset.pathwayOutcome = outcome;
+  const label = document.createElement("strong");
+  label.textContent = spec.label;
+  const detail = document.createElement("small");
+  detail.textContent = spec.detail;
+  button.append(label, detail);
+  byId("pathwayChoices").appendChild(button);
+}
+
+function renderPathwayPanel(errorMessage = "") {
+  const panel = byId("pathwayPanel");
+  if (!state.record) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const pathway = state.pathway;
+  if (!pathway) {
+    byId("pathwayCurrentNode").textContent = "Unavailable";
+    byId("pathwayVersion").textContent = "—";
+    byId("pathwayCycle").textContent = "—";
+    byId("pathwayChecksum").textContent = "—";
+    byId("pathwayDecisionForm").hidden = true;
+    byId("pathwayStatus").textContent = errorMessage || "The pinned pathway could not be loaded.";
+    renderPathwayDecisionHistory();
+    return;
+  }
+
+  const run = pathway.run || {};
+  const definition = pathway.definition || {};
+  const node = currentPathwayNode();
+  byId("pathwayCurrentNode").textContent = pathwayNodeLabel(node);
+  byId("pathwayVersion").textContent = `${firstValue(run.family_key, definition.family_key, "pathway")} v${firstValue(run.version, definition.version, "—")}`;
+  byId("pathwayCycle").textContent = String(firstValue(run.cycle_number, "—"));
+  byId("pathwayChecksum").textContent = String(firstValue(run.definition_checksum, definition.checksum, "—"));
+  byId("pathwayStatus").textContent = errorMessage;
+  byId("pathwayTitle").textContent = TERMINAL_PATHWAY_NODES.has(node)
+    ? pathwayNodeLabel(node)
+    : "Choose what happens next";
+  byId("pathwayPrompt").textContent = TERMINAL_PATHWAY_NODES.has(node)
+    ? "This is a legitimate organizational outcome. The append-only decision history remains available for review and replay."
+    : `The record is currently at ${pathwayNodeLabel(node)}. The model may draft a route; the organization records the decision and rationale.`;
+
+  document.querySelectorAll(".pathway-choice-dynamic").forEach((button) => button.remove());
+  const edges = pathwayEdgesForCurrentNode();
+  const definedOutcomes = new Set(edges.map((edge) => String(edge.outcome)));
+  const availableOutcomes = new Set(asArray(pathway.available_transitions).map((edge) => String(edge.outcome)));
+  definedOutcomes.forEach((outcome) => appendDynamicPathwayChoice(outcome));
+  const currentStageIndex = STAGES.findIndex((stage) => stage.key === node);
+  const guidedProceedReady = currentStageIndex < 0 || node === "synthesis" || stageIsComplete(currentStageIndex);
+  byId("pathwayDecisionForm").hidden = TERMINAL_PATHWAY_NODES.has(node) || !edges.length;
+  byId("pathwayChoices").querySelectorAll("[data-pathway-outcome]").forEach((button) => {
+    const outcome = String(button.dataset.pathwayOutcome);
+    const isGatedRoute = outcome === "proceed" || outcome === "retire";
+    const isDefined = definedOutcomes.has(outcome);
+    const isAvailable = availableOutcomes.has(outcome);
+    const hiddenForRunState = run.status === "paused"
+      ? outcome !== "resume"
+      : outcome === "resume";
+    button.hidden = !isDefined || hiddenForRunState;
+    button.disabled = !isDefined || (!isGatedRoute && !isAvailable) || (outcome === "proceed" && !guidedProceedReady);
+    if (outcome === "proceed" && !guidedProceedReady) {
+      button.title = "Complete this guided review node before proceeding.";
+    } else {
+      button.removeAttribute("title");
+    }
+  });
+  renderPathwayDecisionHistory();
 }
 
 function loadRecordAnnotations() {
@@ -546,8 +844,9 @@ function renderRecordsDialog() {
       const title = document.createElement("strong");
       title.textContent = String(firstValue(record.title, record.organization_name, record.organization, "Untitled review"));
       const detail = document.createElement("small");
-      const step = Math.min(7, Math.max(0, nextRecordStage(record)));
-      detail.textContent = step === 7 ? "Synthesis ready" : `Continue at ${STAGES[step].label}`;
+      const synthesisIndex = synthesisStageIndex();
+      const step = Math.min(synthesisIndex, Math.max(0, nextRecordStage(record)));
+      detail.textContent = step === synthesisIndex ? "Synthesis ready" : `Continue at ${stageDefinition(step).label}`;
       label.append(title, detail);
       const arrow = document.createElement("span");
       arrow.setAttribute("aria-hidden", "true");
@@ -568,9 +867,11 @@ async function resumeRecord(id) {
       ? { ...state.record.synthesis, concept_map: state.record.concept_map }
       : null;
     loadRecordAnnotations();
+    await loadPathway();
     byId("recordsDialog").close();
     renderNavigation();
-    await selectStage(nextRecordStage(state.record), false);
+    if (state.pathway) await navigateToPathwayNode(currentPathwayNode());
+    else await selectStage(nextRecordStage(state.record), false);
   } catch (error) {
     showToast(error.message);
   }
@@ -579,9 +880,17 @@ async function resumeRecord(id) {
 function showRecordHome() {
   state.record = null;
   state.synthesis = null;
+  state.pathway = null;
+  state.sidecarHistory = [];
+  state.sidecarRecordId = "";
+  state.sidecarSelectionKey = "";
+  state.currentView = "record";
   byId("recordHome").hidden = false;
   byId("conversationStage").hidden = true;
   byId("synthesisStage").hidden = true;
+  byId("fieldworkStage").hidden = true;
+  byId("pathwayDestination").hidden = true;
+  byId("pathwayPanel").hidden = true;
   byId("recordName").textContent = "Guided review";
   byId("mobileStageTitle").textContent = "Describe the proposal";
   renderNavigation();
@@ -609,6 +918,7 @@ async function createRecord(event) {
     state.record = normalizeRecord(payload);
     state.records.unshift(state.record);
     form.reset();
+    await loadPathway();
     renderNavigation();
     await selectStage(0, false);
   } catch (error) {
@@ -620,23 +930,58 @@ async function createRecord(event) {
 
 function stageCollection(record = state.record) {
   if (!record) return {};
-  const stages = firstValue(record.stages, record.stage_records, {});
-  if (Array.isArray(stages)) {
-    return Object.fromEntries(stages.map((stage, index) => [String(firstValue(stage.key, stage.stage, index)), stage]));
-  }
-  return stages || {};
+  const collection = {};
+  [record.stage_records, record.stages, record.stage_states].forEach((stages) => {
+    if (Array.isArray(stages)) {
+      stages.forEach((stage, index) => {
+        collection[String(firstValue(stage && stage.key, stage && stage.stage, index))] = stage;
+      });
+    } else if (stages && typeof stages === "object") {
+      Object.assign(collection, stages);
+    }
+  });
+  return collection;
+}
+
+function pinnedCycleForStage(index, record = state.record) {
+  const definition = STAGES[index];
+  if (!definition || record !== state.record || currentPathwayNode() !== definition.key) return null;
+  const cycle = Number(state.pathway && state.pathway.run && state.pathway.run.cycle_number);
+  return Number.isInteger(cycle) && cycle >= 1 ? cycle : null;
 }
 
 function stageRecord(index, record = state.record) {
   const stages = stageCollection(record);
-  return firstValue(stages[STAGES[index].key], stages[String(index)], stages[index], null);
+  const definition = STAGES[index];
+  if (!definition) return null;
+  const pinnedCycle = pinnedCycleForStage(index, record);
+  if (pinnedCycle !== null) {
+    const pass = asArray(record && record.stage_passes)
+      .filter((item) => String(firstValue(item && item.stage, item && item.key, "")) === definition.key)
+      .findLast((item) => Number(firstValue(item && item.cycle_number, 1)) === pinnedCycle);
+    if (pass) return pass;
+  }
+  const candidate = firstValue(stages[definition.key], stages[String(index)], stages[index], null);
+  if (
+    pinnedCycle !== null &&
+    candidate &&
+    Number(firstValue(candidate.cycle_number, 1)) !== pinnedCycle
+  ) return null;
+  return candidate;
 }
 
 function stageIsComplete(index, record = state.record) {
+  const definition = STAGES[index];
+  if (!definition || definition.key === "synthesis") return false;
+  const pinnedCycle = pinnedCycleForStage(index, record);
   const completedSteps = asArray(record && record.completed_steps);
-  if (completedSteps.some((step) => String(firstValue(step.stage, step.key, step)) === STAGES[index].key)) return true;
+  if (completedSteps.some((step) => (
+    String(firstValue(step.stage, step.key, step)) === definition.key &&
+    (pinnedCycle === null || Number(firstValue(step.cycle_number, 1)) === pinnedCycle)
+  ))) return true;
   const stage = stageRecord(index, record);
   if (stage) return ["complete", "completed"].includes(String(stage.status).toLowerCase()) || stage.completed === true || Boolean(stage.completed_at);
+  if (pinnedCycle !== null) return false;
   const completedThrough = Number(firstValue(record && record.completed_through, record && record.completed_step, -1));
   return completedThrough >= index;
 }
@@ -648,16 +993,19 @@ function nextRecordStage(record) {
     const current = STAGES.findIndex((stage) => stage.key === record.current_stage);
     if (current >= 0) return current;
   }
-  for (let index = 0; index < 7; index += 1) {
+  for (let index = 0; index < reviewStageCount(); index += 1) {
     if (!stageIsComplete(index, record)) return index;
   }
-  return 7;
+  return synthesisStageIndex();
 }
 
 function canOpenStage(index) {
   if (!state.record) return index === 0;
+  if (state.pathway && currentPathwayNode() === String(STAGES[index] && STAGES[index].key)) return true;
   if (index === 0) return true;
-  if (index === 7) return Array.from({ length: 7 }, (_, stage) => stageIsComplete(stage)).every(Boolean);
+  if (index === synthesisStageIndex()) {
+    return Array.from({ length: reviewStageCount() }, (_, stage) => stageIsComplete(stage)).every(Boolean);
+  }
   return stageIsComplete(index - 1) || Boolean(stageRecord(index));
 }
 
@@ -670,8 +1018,8 @@ function renderNavigation() {
     button.className = "stage-nav-button";
     button.dataset.stageIndex = String(index);
     button.disabled = !canOpenStage(index);
-    button.classList.toggle("is-current", Boolean(state.record) && state.currentStage === index);
-    button.classList.toggle("is-complete", index < 7 && stageIsComplete(index));
+    button.classList.toggle("is-current", Boolean(state.record) && state.currentView === "stage" && state.currentStage === index);
+    button.classList.toggle("is-complete", index < reviewStageCount() && stageIsComplete(index));
     const number = document.createElement("span");
     number.className = "nav-number";
     number.textContent = index === 0 ? "0" : String(index);
@@ -680,6 +1028,30 @@ function renderNavigation() {
     button.append(number, label);
     navigation.appendChild(button);
   });
+  if (state.record) {
+    const fieldworkButton = document.createElement("button");
+    fieldworkButton.type = "button";
+    fieldworkButton.className = "stage-nav-button stage-nav-utility";
+    fieldworkButton.dataset.action = "open-fieldwork";
+    fieldworkButton.classList.toggle("is-current", state.currentView === "fieldwork");
+    const fieldworkMark = document.createElement("span");
+    fieldworkMark.className = "nav-number";
+    fieldworkMark.textContent = "F";
+    const fieldworkLabel = document.createElement("span");
+    fieldworkLabel.textContent = "Fieldwork cycles";
+    fieldworkButton.append(fieldworkMark, fieldworkLabel);
+    const pathwayButton = document.createElement("button");
+    pathwayButton.type = "button";
+    pathwayButton.className = "stage-nav-button stage-nav-utility";
+    pathwayButton.dataset.action = "focus-pathway";
+    const pathwayMark = document.createElement("span");
+    pathwayMark.className = "nav-number";
+    pathwayMark.textContent = "P";
+    const pathwayLabel = document.createElement("span");
+    pathwayLabel.textContent = "Pathway decisions";
+    pathwayButton.append(pathwayMark, pathwayLabel);
+    navigation.append(fieldworkButton, pathwayButton);
+  }
   if (state.record) {
     byId("recordName").textContent = String(firstValue(
       state.record.title,
@@ -692,31 +1064,44 @@ function renderNavigation() {
 
 async function selectStage(index, startIfEmpty = false) {
   if (!state.record || !canOpenStage(index)) return;
+  state.currentView = "stage";
   state.currentStage = index;
   renderNavigation();
   byId("recordHome").hidden = true;
-  byId("conversationStage").hidden = index === 7;
-  byId("synthesisStage").hidden = index !== 7;
-  byId("mobileStageTitle").textContent = STAGES[index].shortLabel;
+  byId("fieldworkStage").hidden = true;
+  byId("pathwayDestination").hidden = true;
+  const synthesisIndex = synthesisStageIndex();
+  byId("conversationStage").hidden = index === synthesisIndex;
+  byId("synthesisStage").hidden = index !== synthesisIndex;
+  byId("mobileStageTitle").textContent = stageDefinition(index).shortLabel;
   closeMobileSidebar();
   window.scrollTo({ top: 0 });
-  if (index === 7) {
+  if (index === synthesisIndex) {
     await openSynthesis();
   } else {
     await openConversationStage(index, startIfEmpty);
   }
+  renderPathwayPanel();
 }
 
 function recordTurns(index) {
   const stage = stageRecord(index);
+  const definition = stageDefinition(index);
+  const pinnedCycle = pinnedCycleForStage(index);
+  const inPinnedCycle = (turn) => (
+    pinnedCycle === null || Number(firstValue(turn && turn.cycle_number, 1)) === pinnedCycle
+  );
   const direct = firstValue(stage && stage.turns, stage && stage.messages, null);
-  if (direct) return asArray(direct);
+  if (direct) return asArray(direct).filter(inPinnedCycle);
   const conversations = firstValue(state.record && state.record.conversations, {});
-  const grouped = firstValue(conversations && conversations[STAGES[index].key], conversations && conversations[String(index)], null);
-  if (grouped) return asArray(grouped);
+  const grouped = firstValue(conversations && conversations[definition.key], conversations && conversations[String(index)], null);
+  if (grouped) return asArray(grouped).filter(inPinnedCycle);
   const looseTurns = asArray(state.record && state.record.turns).filter((turn) => {
     const stageValue = firstValue(turn.stage, turn.stage_key, turn.step);
-    return String(stageValue) === STAGES[index].key || Number(stageValue) === index;
+    const matchesStage = String(stageValue) === definition.key || Number(stageValue) === index;
+    return matchesStage && (
+      pinnedCycle === null || Number(firstValue(turn.cycle_number, 1)) === pinnedCycle
+    );
   });
   const initialProposal = index === 0 && firstValue(state.record && state.record.proposal, state.record && state.record.proposed_use);
   if (looseTurns.length) {
@@ -726,14 +1111,6 @@ function recordTurns(index) {
       : looseTurns;
   }
   return initialProposal ? [{ role: "user", content: String(initialProposal) }] : [];
-}
-
-function savedUserTurnCount(index = state.currentStage) {
-  return asArray(state.record && state.record.turns).filter((turn) => {
-    const stageValue = firstValue(turn.stage, turn.stage_key, turn.step);
-    const matchesStage = String(stageValue) === STAGES[index].key || Number(stageValue) === index;
-    return matchesStage && ["user", "human"].includes(String(firstValue(turn.role, turn.author, "")).toLowerCase());
-  }).length;
 }
 
 function payloadTurns(payload) {
@@ -746,9 +1123,9 @@ function payloadTurns(payload) {
 function mergePayloadTurns(payload) {
   if (!state.record) return;
   const existing = asArray(state.record.turns);
-  const seen = new Set(existing.map((turn) => String(firstValue(turn.id, `${turn.stage}:${turn.ordinal}:${turn.role}`))));
+  const seen = new Set(existing.map((turn) => String(firstValue(turn.id, `${turn.stage}:${firstValue(turn.cycle_number, 1)}:${turn.ordinal}:${turn.role}`))));
   payloadTurns(payload).forEach((turn) => {
-    const identity = String(firstValue(turn.id, `${turn.stage}:${turn.ordinal}:${turn.role}`));
+    const identity = String(firstValue(turn.id, `${turn.stage}:${firstValue(turn.cycle_number, 1)}:${turn.ordinal}:${turn.role}`));
     if (!seen.has(identity)) {
       existing.push(turn);
       seen.add(identity);
@@ -787,43 +1164,317 @@ function appendMessage(role, content, thinking = false) {
   return article;
 }
 
+function interfaceFromStage(index = state.currentStage) {
+  const stage = stageRecord(index) || {};
+  const action = stage.next_action && typeof stage.next_action === "object" ? stage.next_action : {};
+  return {
+    ...action,
+    stage_status: firstValue(stage.stage_status, stage.status, ""),
+    coverage: firstValue(stage.coverage, {}),
+    coverage_summary: firstValue(stage.coverage_summary, {}),
+    blockers: asArray(stage.blockers),
+    delegations: asArray(stage.delegations),
+    open_questions: asArray(stage.open_questions),
+    contradictions: asArray(stage.contradictions),
+    review_routing: asArray(state.record && state.record.review_routing)
+  };
+}
+
+function setTextAndVisibility(id, value) {
+  const element = byId(id);
+  const text = String(value || "").trim();
+  element.textContent = text;
+  element.hidden = !text;
+}
+
+function routeButton(label, action, options = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = options.className || "button button-secondary";
+  button.dataset.routeAction = action;
+  button.dataset.routeContent = String(firstValue(options.content, label));
+  if (options.optionId) button.dataset.optionId = options.optionId;
+  if (options.targetRole) button.dataset.targetRole = options.targetRole;
+  if (options.assigneeId) button.dataset.assigneeId = options.assigneeId;
+  button.textContent = label;
+  return button;
+}
+
+function appendFollowUpGroup(container, title, items, renderItem) {
+  if (!items.length) return;
+  const section = document.createElement("section");
+  section.className = "follow-up-group";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("ul");
+  list.className = "follow-up-list";
+  items.forEach((item) => {
+    const row = document.createElement("li");
+    const content = renderItem(item);
+    const main = document.createElement("strong");
+    main.textContent = content.main;
+    row.appendChild(main);
+    if (content.detail) {
+      const detail = document.createElement("small");
+      detail.textContent = content.detail;
+      row.appendChild(detail);
+    }
+    list.appendChild(row);
+  });
+  section.append(heading, list);
+  container.appendChild(section);
+}
+
+function renderFollowUp(payload) {
+  const stage = stageRecord() || {};
+  const delegations = asArray(firstValue(payload.delegations, stage.delegations, []));
+  const reviewRouting = asArray(firstValue(payload.review_routing, state.record && state.record.review_routing, []));
+  const delegationContainer = byId("delegationsList");
+  const routingContainer = byId("reviewRoutingList");
+  delegationContainer.replaceChildren();
+  routingContainer.replaceChildren();
+
+  appendFollowUpGroup(
+    delegationContainer,
+    "Delegated questions",
+    delegations,
+    (item) => ({
+      main: String(firstValue(item.question, item.text, "Question awaiting a response")),
+      detail: [
+        firstValue(item.target_role_label, item.target_role, "Another reviewer"),
+        firstValue(item.status, "open")
+      ].filter(Boolean).join(" · ")
+    })
+  );
+
+  reviewRouting.forEach((group) => {
+    appendFollowUpGroup(
+      routingContainer,
+      String(firstValue(group.label, group.role, "Reviewer")),
+      asArray(group.items),
+      (item) => ({
+        main: String(firstValue(item.text, item.question, "Follow-up needed")),
+        detail: [firstValue(item.kind, "Review item"), item.stage_label].filter(Boolean).join(" · ")
+      })
+    );
+  });
+
+  byId("followUpPanel").hidden = !delegationContainer.children.length && !routingContainer.children.length;
+}
+
+function renderInterface(payload = {}) {
+  const stage = stageRecord() || {};
+  const merged = { ...interfaceFromStage(), ...payload };
+  const interfaceState = INTERFACE_STATES.has(String(merged.interface_state))
+    ? String(merged.interface_state)
+    : "";
+  const completed = stageIsComplete(state.currentStage);
+  state.currentInterface = interfaceState ? { ...merged, interface_state: interfaceState } : null;
+
+  const panel = byId("routePanel");
+  panel.hidden = !interfaceState;
+  const dimension = String(firstValue(merged.dimension_label, merged.dimension, "")).trim();
+  byId("routeDimension").textContent = dimension || "Current question";
+  const coverage = merged.coverage_summary && typeof merged.coverage_summary === "object"
+    ? merged.coverage_summary
+    : {};
+  byId("coverageLabel").textContent = String(firstValue(
+    coverage.label,
+    typeof merged.coverage_summary === "string" ? merged.coverage_summary : ""
+  ));
+  setTextAndVisibility("routeContext", merged.context_sentence);
+  byId("routePrompt").textContent = String(firstValue(merged.prompt, "Continue the review"));
+  setTextAndVisibility("routeStatement", interfaceState === "confirm" ? merged.statement : "");
+
+  const conflict = merged.conflict && typeof merged.conflict === "object" ? merged.conflict : {};
+  const showConflict = interfaceState === "resolve_conflict" && Boolean(conflict.earlier && conflict.now);
+  byId("routeConflict").hidden = !showConflict;
+  byId("conflictEarlier").textContent = showConflict ? String(conflict.earlier) : "";
+  byId("conflictNow").textContent = showConflict ? String(conflict.now) : "";
+
+  const choices = byId("routeChoices");
+  const choiceList = byId("routeChoiceList");
+  choiceList.replaceChildren();
+  const options = asArray(merged.options).filter((option) => option && firstValue(option.label, option.text));
+  if (["choose", "classify"].includes(interfaceState) && options.length) {
+    options.forEach((option) => {
+      const button = routeButton(
+        String(firstValue(option.label, option.text)),
+        interfaceState === "classify" ? "classification" : "choice",
+        {
+          className: "route-choice",
+          content: String(firstValue(option.label, option.text)),
+          optionId: String(firstValue(option.id, option.value, ""))
+        }
+      );
+      const label = document.createElement("strong");
+      label.textContent = String(firstValue(option.label, option.text));
+      button.textContent = "";
+      button.appendChild(label);
+      if (option.detail) {
+        const detail = document.createElement("small");
+        detail.textContent = String(option.detail);
+        button.appendChild(detail);
+      }
+      choiceList.appendChild(button);
+    });
+    choices.hidden = false;
+  } else {
+    choices.hidden = true;
+  }
+
+  const primary = byId("routePrimaryActions");
+  primary.replaceChildren();
+  if (interfaceState === "confirm") {
+    primary.appendChild(routeButton("Confirm this statement", "reply", { content: "Yes, this is accurate." }));
+  } else if (interfaceState === "delegate") {
+    const role = String(firstValue(merged.target_role, "program_staff"));
+    const roleLabel = String(merged.target_role_label || role.replaceAll("_", " "));
+    primary.appendChild(routeButton(`Delegate to ${roleLabel}`, "delegate", {
+      content: String(firstValue(merged.prompt, "Please answer this question.")),
+      targetRole: role
+    }));
+  } else if (interfaceState === "record_unknown") {
+    primary.appendChild(routeButton("Record this as unknown", "unknown", {
+      content: `We do not know this yet: ${String(firstValue(merged.prompt, "This question remains open."))}`
+    }));
+  }
+
+  const quickActions = byId("routeQuickActions");
+  quickActions.replaceChildren();
+  asArray(merged.quick_actions).forEach((action) => {
+    const key = String(action);
+    if (!QUICK_ACTION_LABELS[key]) return;
+    const options = {};
+    if (key === "unknown") options.content = `We do not know this yet: ${String(firstValue(merged.prompt, "This question remains open."))}`;
+    if (key === "not_applicable") options.content = "This does not apply to the proposal.";
+    if (key === "delegate") {
+      options.content = String(firstValue(merged.prompt, "Please answer this question."));
+      options.targetRole = String(firstValue(merged.target_role, "program_staff"));
+    }
+    quickActions.appendChild(routeButton(QUICK_ACTION_LABELS[key], key, options));
+  });
+  setTextAndVisibility("routeConsequence", merged.consequence);
+
+  const form = byId("messageForm");
+  form.hidden = completed;
+  const input = byId("messageInput");
+  const sendButton = byId("sendMessageButton");
+  input.placeholder = ["review_stage", "complete_stage"].includes(interfaceState)
+    ? "Correct or add to the draft…"
+    : interfaceState === "resolve_conflict"
+      ? "Explain what changed or how both accounts fit…"
+      : "Your response…";
+  sendButton.textContent = ["review_stage", "complete_stage"].includes(interfaceState)
+    ? "Send correction"
+    : "Send response";
+
+  renderFollowUp(merged);
+  const ready = responseIsReady(merged) || ["review_stage", "complete_stage"].includes(interfaceState);
+  if (completed) {
+    showCompletion("This step is complete. Its saved record remains available for review.", firstValue(merged.draft_record, ""), true);
+  } else if (ready) {
+    showCompletion(
+      firstValue(coverage.label, merged.summary, "Review the drafted record, correct anything that is wrong, and complete this step when the organization is ready."),
+      firstValue(merged.draft_record, ""),
+      false
+    );
+  } else {
+    byId("completionPanel").hidden = true;
+  }
+}
+
 async function openConversationStage(index, startIfEmpty) {
-  const definition = STAGES[index];
+  const definition = stageDefinition(index);
   byId("stageKicker").textContent = index === 0 ? "Entry screen" : `Step ${index}`;
   byId("stageTitle").textContent = definition.label;
   byId("stageIntro").textContent = definition.intro;
   byId("completionPanel").hidden = true;
+  byId("messageForm").hidden = false;
   byId("messageInput").disabled = false;
   byId("sendMessageButton").disabled = false;
 
   const turns = recordTurns(index);
   renderTurns(turns);
-  const stage = stageRecord(index);
-  const ready = stage && (stage.ready_to_complete || stage.can_complete || String(stage.status).toLowerCase() === "ready");
-  if (ready || savedUserTurnCount(index) >= STAGES[index].answers) {
-    showCompletion(firstValue(stage && stage.summary, stage && stage.completion_summary, ""));
-  }
+  renderInterface(interfaceFromStage(index));
   const hasGuideTurn = turns.map(normalizeTurn).some((turn) => turn.role === "assistant");
   if (!hasGuideTurn) await startStage(index);
 }
 
 function updateRecordFromPayload(payload) {
   if (payload.record || payload.adoption_record) state.record = normalizeRecord(payload);
+  if (payload.pathway) state.pathway = pathwayState(payload);
   if (payload.stage && typeof payload.stage === "object") {
     const stages = stageCollection();
     if (Array.isArray(state.record.stages)) {
-      const match = state.record.stages.findIndex((stage) => String(firstValue(stage.key, stage.stage)) === STAGES[state.currentStage].key);
+      const match = state.record.stages.findIndex((stage) => String(firstValue(stage.key, stage.stage)) === stageDefinition().key);
       if (match >= 0) state.record.stages[match] = payload.stage;
       else state.record.stages.push(payload.stage);
     } else {
-      state.record.stages = { ...stages, [STAGES[state.currentStage].key]: payload.stage };
+      state.record.stages = { ...stages, [stageDefinition().key]: payload.stage };
     }
+  }
+  const currentDefinition = stageDefinition();
+  const stageKey = typeof payload.stage === "string" ? payload.stage : currentDefinition.key;
+  const hasStructuredStage = Boolean(
+    payload.interface_state ||
+    payload.stage_status ||
+    payload.coverage ||
+    payload.coverage_summary ||
+    payload.delegations ||
+    payload.review_routing
+  );
+  if (hasStructuredStage && stageKey && stageKey !== "synthesis") {
+    const stageStates = state.record.stage_states && typeof state.record.stage_states === "object"
+      ? state.record.stage_states
+      : {};
+    const existing = stageStates[stageKey] || {};
+    const action = {};
+    [
+      "interface_state",
+      "dimension",
+      "dimension_label",
+      "context_sentence",
+      "prompt",
+      "options",
+      "statement",
+      "conflict",
+      "target_role",
+      "target_role_label",
+      "consequence",
+      "quick_actions"
+    ].forEach((key) => {
+      if (payload[key] !== undefined) action[key] = payload[key];
+    });
+    state.record.stage_states = {
+      ...stageStates,
+      [stageKey]: {
+        ...existing,
+        cycle_number: Number(firstValue(payload.cycle_number, existing.cycle_number, 1)),
+        status: firstValue(payload.stage_status, existing.status, "in_progress"),
+        coverage: firstValue(payload.coverage, existing.coverage, {}),
+        coverage_summary: firstValue(payload.coverage_summary, existing.coverage_summary, {}),
+        blockers: firstValue(payload.blockers, existing.blockers, []),
+        delegations: firstValue(payload.delegations, existing.delegations, []),
+        open_questions: firstValue(payload.open_questions, existing.open_questions, []),
+        contradictions: firstValue(payload.contradictions, existing.contradictions, []),
+        next_action: Object.keys(action).length ? action : existing.next_action
+      }
+    };
   }
   mergePayloadTurns(payload);
   if (payload.record_text && payload.stage && typeof payload.stage === "string") {
     const completed = asArray(state.record.completed_steps);
-    if (!completed.some((step) => String(firstValue(step.stage, step)) === payload.stage)) {
-      completed.push({ stage: payload.stage, record_text: payload.record_text });
+    const cycleNumber = Number(firstValue(payload.cycle_number, 1));
+    if (!completed.some((step) => (
+      String(firstValue(step.stage, step)) === payload.stage &&
+      Number(firstValue(step.cycle_number, 1)) === cycleNumber
+    ))) {
+      completed.push({
+        stage: payload.stage,
+        cycle_number: cycleNumber,
+        record_text: payload.record_text
+      });
     }
     state.record.completed_steps = completed;
   }
@@ -842,7 +1493,8 @@ function responseIsReady(payload) {
     payload.can_complete ||
     payload.stage_complete ||
     (payload.stage && (payload.stage.ready_to_complete || payload.stage.can_complete)) ||
-    String(payload.status || "").toLowerCase() === "ready"
+    String(firstValue(payload.stage_status, payload.status, "")).toLowerCase() === "ready" ||
+    ["review_stage", "complete_stage"].includes(String(payload.interface_state || ""))
   );
 }
 
@@ -853,19 +1505,19 @@ async function startStage(index) {
   const thinking = appendMessage("assistant", "", true);
   try {
     const payload = await api.request(
-      `/api/records/${encodeURIComponent(recordId())}/stages/${encodeURIComponent(STAGES[index].key)}/start`,
+      `/api/records/${encodeURIComponent(recordId())}/stages/${encodeURIComponent(stageDefinition(index).key)}/start`,
       { method: "POST", body: {}, idempotent: true }
     );
     thinking.remove();
     updateRecordFromPayload(payload);
     const messages = asArray(payload.messages).map(normalizeTurn).filter((turn) => turn.content);
     if (messages.length) {
-      messages.forEach((message) => appendMessage(message.role, message.content));
+      renderTurns(recordTurns(index));
     } else {
       const content = responseMessage(payload);
       if (content) appendMessage("assistant", content);
     }
-    if (responseIsReady(payload)) showCompletion(firstValue(payload.summary, payload.completion_summary, ""));
+    renderInterface(payload);
     renderNavigation();
     setSaveStatus("Saved");
   } catch (error) {
@@ -880,12 +1532,28 @@ async function startStage(index) {
 
 async function sendStageMessage(event) {
   event.preventDefault();
-  if (state.inflight) return;
   const input = byId("messageInput");
   const content = input.value.trim();
   if (!content) return;
   input.value = "";
-  appendMessage("user", content);
+  const interfaceState = state.currentInterface && state.currentInterface.interface_state;
+  const action = ["confirm", "resolve_conflict", "review_stage", "complete_stage"].includes(interfaceState)
+    ? "correction"
+    : "reply";
+  await submitStageResponse({ content, action });
+}
+
+async function submitStageResponse({
+  content,
+  action = "reply",
+  optionId = "",
+  targetRole = "",
+  assigneeId = "",
+  displayContent = ""
+}) {
+  if (state.inflight || !String(content || "").trim()) return;
+  const normalizedContent = String(content).trim();
+  appendMessage("user", displayContent || normalizedContent);
   setSaveStatus("Saving…");
   state.inflight = true;
   setConversationBusy(true);
@@ -893,10 +1561,18 @@ async function sendStageMessage(event) {
   const idempotencyKey = makeRequestId();
   try {
     const payload = await api.request(
-      `/api/records/${encodeURIComponent(recordId())}/stages/${encodeURIComponent(STAGES[state.currentStage].key)}/messages`,
+      `/api/records/${encodeURIComponent(recordId())}/stages/${encodeURIComponent(stageDefinition().key)}/messages`,
       {
         method: "POST",
-        body: { content, idempotency_key: idempotencyKey },
+        body: {
+          content: normalizedContent,
+          idempotency_key: idempotencyKey,
+          action,
+          dimension: String(firstValue(state.currentInterface && state.currentInterface.dimension, "")) || null,
+          option_id: optionId || null,
+          target_role: targetRole || null,
+          assignee_id: assigneeId || null
+        },
         idempotent: true,
         idempotencyKey
       }
@@ -905,9 +1581,7 @@ async function sendStageMessage(event) {
     updateRecordFromPayload(payload);
     const response = responseMessage(payload);
     if (response) appendMessage("assistant", response);
-    if (responseIsReady(payload) || savedUserTurnCount() >= STAGES[state.currentStage].answers) {
-      showCompletion(firstValue(payload.summary, payload.completion_summary, ""));
-    }
+    renderInterface(payload);
     setSaveStatus("Saved");
   } catch (error) {
     thinking.remove();
@@ -919,19 +1593,59 @@ async function sendStageMessage(event) {
   }
 }
 
+async function handleRouteAction(button) {
+  const action = String(button.dataset.routeAction || "");
+  if (!["reply", "choice", "classification", "unknown", "not_applicable", "delegate"].includes(action)) return;
+  const delegateRole = String(firstValue(
+    button.dataset.targetRole,
+    state.currentInterface && state.currentInterface.target_role,
+    ""
+  ));
+  const delegateLabel = String(
+    state.currentInterface && (
+      state.currentInterface.target_role_label ||
+      delegateRole.replaceAll("_", " ")
+    ) ||
+    "another reviewer"
+  );
+  const displayContent = action === "unknown"
+    ? QUICK_ACTION_LABELS.unknown
+    : action === "not_applicable"
+      ? QUICK_ACTION_LABELS.not_applicable
+      : action === "delegate"
+        ? `Delegate to ${delegateLabel}`
+        : "";
+  await submitStageResponse({
+    content: button.dataset.routeContent || button.textContent || "Response",
+    action,
+    optionId: button.dataset.optionId || "",
+    targetRole: button.dataset.targetRole || "",
+    assigneeId: button.dataset.assigneeId || "",
+    displayContent
+  });
+}
+
 function setConversationBusy(busy) {
   byId("messageInput").disabled = busy;
   byId("sendMessageButton").disabled = busy;
+  document.querySelectorAll("[data-route-action]").forEach((button) => {
+    button.disabled = busy;
+  });
   byId("conversationStage").setAttribute("aria-busy", busy ? "true" : "false");
-  if (!busy) byId("messageInput").focus();
+  if (!busy && !byId("messageForm").hidden) byId("messageInput").focus();
 }
 
 function setSaveStatus(message) {
   byId("saveStatus").textContent = message;
 }
 
-function showCompletion(summary) {
+function showCompletion(summary, draftRecord = "", completed = false) {
   byId("completionSummary").textContent = summary || "The guide has enough information to draft this part of the adoption record.";
+  const review = byId("stageRecordReview");
+  const draft = String(draftRecord || "").trim();
+  review.hidden = !draft;
+  if (draft) byId("stageRecordText").value = draft;
+  byId("completeStageButton").hidden = completed;
   byId("completionPanel").hidden = false;
 }
 
@@ -942,8 +1656,12 @@ async function completeCurrentStage() {
   setSaveStatus("Saving…");
   try {
     const payload = await api.request(
-      `/api/records/${encodeURIComponent(recordId())}/stages/${encodeURIComponent(STAGES[state.currentStage].key)}/complete`,
-      { method: "POST", body: {}, idempotent: true }
+      `/api/records/${encodeURIComponent(recordId())}/stages/${encodeURIComponent(stageDefinition().key)}/complete`,
+      {
+        method: "POST",
+        body: { record_text: byId("stageRecordReview").hidden ? null : byId("stageRecordText").value.trim() || null },
+        idempotent: true
+      }
     );
     updateRecordFromPayload(payload);
     const completedIndex = state.currentStage;
@@ -951,20 +1669,761 @@ async function completeCurrentStage() {
       const stage = stageRecord(completedIndex) || {};
       stage.status = "completed";
       if (!state.record.stages || Array.isArray(state.record.stages)) {
-        state.record.stages = { ...stageCollection(), [STAGES[completedIndex].key]: stage };
+        state.record.stage_states = { ...stageCollection(), [stageDefinition(completedIndex).key]: stage };
       } else {
-        state.record.stages[STAGES[completedIndex].key] = stage;
+        const collection = stageCollection();
+        collection[stageDefinition(completedIndex).key] = stage;
       }
     }
+    state.pathway = pathwayState(payload) || state.pathway;
+    if (!state.pathway) await loadPathway();
     renderNavigation();
+    renderInterface(interfaceFromStage(completedIndex));
+    renderPathwayPanel();
     setSaveStatus("Saved");
-    showToast(`${STAGES[completedIndex].label} saved.`);
-    await selectStage(Math.min(7, completedIndex + 1), false);
+    showToast(`${stageDefinition(completedIndex).label} saved. Choose the organization’s route below.`);
+    byId("pathwayRationale").focus();
   } catch (error) {
     showToast(error.message);
     setSaveStatus("Save failed");
   } finally {
     button.disabled = false;
+  }
+}
+
+function pathwayDecisionNeedsConfirmation(outcome) {
+  return ["non_ai", "walk_away", "retire"].includes(outcome) ||
+    (outcome === "proceed" && UNGUIDED_PATHWAY_NODES.has(currentPathwayNode()));
+}
+
+function openPathwayConfirmation(outcome, rationale) {
+  const label = firstValue(PATHWAY_OUTCOMES[outcome] && PATHWAY_OUTCOMES[outcome].label, outcome.replaceAll("_", " "));
+  const node = pathwayNodeLabel();
+  const copy = outcome === "non_ai"
+    ? `Confirm a non-AI route from ${node}. The fieldwork and decision record will remain available, and this will be recorded as a valid outcome rather than a failed review.`
+    : outcome === "walk_away"
+      ? `Confirm that the organization is walking away from this proposal at ${node}. This closes progression while preserving the reasons and evidence.`
+      : outcome === "retire"
+        ? `Confirm retirement from ${node}. This commits a retirement approval and preserves the monitoring record.`
+        : `Confirm that ${node} is ready to proceed. This records a bounded, server-owned checkpoint before the evidence-bound approval and transition.`;
+  state.pendingPathwayDecision = { outcome, rationale };
+  byId("pathwayConfirmTitle").textContent = label;
+  byId("pathwayConfirmCopy").textContent = copy;
+  byId("confirmPathwayDecisionButton").textContent = `Confirm ${String(label).toLowerCase()}`;
+  byId("confirmPathwayDecisionButton").classList.toggle("button-danger", ["walk_away", "retire"].includes(outcome));
+  byId("pathwayConfirmDialog").showModal();
+  byId("confirmPathwayDecisionButton").focus();
+}
+
+async function handlePathwayDecision(event) {
+  event.preventDefault();
+  const submitter = event.submitter;
+  const outcome = String(submitter && submitter.dataset.pathwayOutcome || "");
+  const rationale = byId("pathwayRationale").value.trim();
+  if (!outcome || !event.currentTarget.reportValidity()) return;
+  if (pathwayDecisionNeedsConfirmation(outcome)) {
+    openPathwayConfirmation(outcome, rationale);
+    return;
+  }
+  await executePathwayDecision(outcome, rationale);
+}
+
+function setPathwayBusy(busy) {
+  byId("pathwayDecisionForm").setAttribute("aria-busy", busy ? "true" : "false");
+  byId("pathwayRationale").disabled = busy;
+  byId("pathwayChoices").querySelectorAll("button").forEach((button) => {
+    button.disabled = busy || button.disabled;
+  });
+  byId("confirmPathwayDecisionButton").disabled = busy;
+  byId("cancelPathwayDecisionButton").disabled = busy;
+}
+
+async function executePathwayDecision(outcome, rationale) {
+  if (state.inflight || !state.pathway) return;
+  const node = currentPathwayNode();
+  state.inflight = true;
+  setPathwayBusy(true);
+  byId("pathwayStatus").textContent = "Committing the organization’s decision…";
+  try {
+    const idempotencyKey = makeRequestId();
+    if (outcome === "proceed" && UNGUIDED_PATHWAY_NODES.has(node)) {
+      const checkpointPayload = await api.request(
+        `/api/records/${encodeURIComponent(recordId())}/pathway/checkpoints`,
+        {
+          method: "POST",
+          body: {
+            node,
+            cycle_number: Number(state.pathway.run.cycle_number),
+            confirmed: true,
+            rationale,
+            idempotency_key: `checkpoint-${idempotencyKey}`
+          },
+          idempotent: true,
+          idempotencyKey: `checkpoint-${idempotencyKey}`
+        }
+      );
+      state.pathway = pathwayState(checkpointPayload) || state.pathway;
+    }
+
+    const approvalGate = outcome === "proceed"
+      ? `${node}_owner`
+      : outcome === "retire"
+        ? "retirement_owner"
+        : "";
+    if (approvalGate && !asArray(state.pathway.approved_gates).includes(approvalGate)) {
+      const approvalPayload = await api.request(
+        `/api/records/${encodeURIComponent(recordId())}/pathway/approvals`,
+        {
+          method: "POST",
+          body: {
+            gate_key: approvalGate,
+            status: "approved",
+            rationale
+          }
+        }
+      );
+      state.pathway = pathwayState(approvalPayload) || state.pathway;
+    }
+
+    const payload = await api.request(
+      `/api/records/${encodeURIComponent(recordId())}/pathway/transitions`,
+      {
+        method: "POST",
+        body: { outcome, rationale, idempotency_key: idempotencyKey },
+        idempotent: true,
+        idempotencyKey
+      }
+    );
+    state.pathway = pathwayState(payload);
+    const nextNode = currentPathwayNode();
+    state.record.current_stage = nextNode;
+    byId("pathwayRationale").value = "";
+    renderPathwayPanel();
+    renderNavigation();
+    showToast(`${firstValue(PATHWAY_OUTCOMES[outcome] && PATHWAY_OUTCOMES[outcome].label, "Pathway decision")} recorded.`);
+    const boundedRouteSignals = {
+      negotiate_return: "pathway.negotiate_selected",
+      non_ai: "pathway.non_ai_selected",
+      walk_away: "pathway.walk_away_selected"
+    };
+    if (boundedRouteSignals[outcome]) {
+      void sendProductSignal(boundedRouteSignals[outcome], {
+        pathway_stage: node,
+        route: outcome
+      });
+    }
+    state.inflight = false;
+    setPathwayBusy(false);
+    await navigateToPathwayNode(nextNode);
+  } catch (error) {
+    byId("pathwayStatus").textContent = error.message;
+    showToast(error.message);
+  } finally {
+    state.inflight = false;
+    setPathwayBusy(false);
+    renderPathwayPanel(byId("pathwayStatus").textContent);
+  }
+}
+
+async function navigateToPathwayNode(node) {
+  const stageIndex = STAGES.findIndex((stage) => stage.key === node);
+  if (stageIndex >= 0 && canOpenStage(stageIndex)) {
+    await selectStage(stageIndex, false);
+    return;
+  }
+  if (TERMINAL_PATHWAY_NODES.has(node)) {
+    showPathwayDestination(node);
+    return;
+  }
+  await openFieldwork();
+}
+
+function showPathwayDestination(node) {
+  state.currentView = "pathway";
+  byId("recordHome").hidden = true;
+  byId("conversationStage").hidden = true;
+  byId("synthesisStage").hidden = true;
+  byId("fieldworkStage").hidden = true;
+  byId("pathwayDestination").hidden = false;
+  byId("mobileStageTitle").textContent = pathwayNodeLabel(node);
+  byId("pathwayDestinationTitle").textContent = pathwayNodeLabel(node);
+  byId("pathwayDestinationCopy").textContent = node === "non_ai"
+    ? "The organization chose a non-AI route. The decision, rationale, fieldwork cycles, and prior evidence remain replayable if conditions change."
+    : node === "walked_away"
+      ? "The organization chose to walk away from this proposal. The record remains available as evidence of governance in practice."
+      : "The organization retired this pathway. Monitoring evidence and the retirement rationale remain in the append-only history.";
+  closeMobileSidebar();
+  renderNavigation();
+  renderPathwayPanel();
+  window.scrollTo({ top: 0 });
+}
+
+function localDateTimeValue(date = new Date()) {
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function observedAtIso() {
+  const input = byId("fieldworkObservedAt");
+  const parsed = new Date(input.value);
+  if (Number.isNaN(parsed.getTime())) throw new Error("Choose a valid observed time.");
+  return parsed.toISOString();
+}
+
+function selectedFieldworkCycle() {
+  return String(byId("fieldworkCycleSelect").value || "");
+}
+
+function canonicalFieldworkBranchId() {
+  return recordId() ? `${recordId()}:canonical` : "";
+}
+
+function currentSidecarSelectionKey() {
+  return [recordId(), selectedFieldworkCycle(), byId("fieldworkScale").value, canonicalFieldworkBranchId()].join("|");
+}
+
+function renderSidecarSelection() {
+  const cycleId = selectedFieldworkCycle();
+  const cycle = state.fieldworkCycles.find((item) => String(item.cycle_id) === cycleId);
+  const enabled = Boolean(cycleId && canonicalFieldworkBranchId());
+  byId("sidecarSelection").textContent = enabled
+    ? `Canonical branch · ${String(firstValue(cycle && cycle.label, cycleId))} · ${byId("fieldworkScale").value.replaceAll("_", " ")} scale`
+    : "Select a fieldwork cycle to begin.";
+  byId("sidecarInput").disabled = !enabled;
+  byId("sendSidecarButton").disabled = !enabled;
+  byId("clearSidecarButton").disabled = !state.sidecarHistory.length;
+}
+
+function resetSidecarChat(message = "") {
+  state.sidecarHistory = [];
+  state.sidecarSelectionKey = currentSidecarSelectionKey();
+  const log = byId("sidecarLog");
+  log.replaceChildren();
+  const empty = document.createElement("p");
+  empty.className = "sidecar-empty";
+  empty.id = "sidecarEmpty";
+  empty.textContent = "No ephemeral messages yet.";
+  log.appendChild(empty);
+  byId("sidecarProvenance").hidden = true;
+  byId("sidecarContextHash").textContent = "—";
+  byId("sidecarModelVersion").textContent = "—";
+  byId("sidecarEventCitations").replaceChildren();
+  byId("sidecarSourceCitations").replaceChildren();
+  byId("sidecarStatus").textContent = message;
+  renderSidecarSelection();
+}
+
+function renderSidecarHistory() {
+  const log = byId("sidecarLog");
+  log.replaceChildren();
+  if (!state.sidecarHistory.length) {
+    const empty = document.createElement("p");
+    empty.className = "sidecar-empty";
+    empty.id = "sidecarEmpty";
+    empty.textContent = "No ephemeral messages yet.";
+    log.appendChild(empty);
+  } else {
+    state.sidecarHistory.forEach((message) => {
+      const article = document.createElement("article");
+      article.className = `sidecar-message is-${message.role}`;
+      const role = document.createElement("span");
+      role.textContent = message.role === "user" ? "You" : "Sidecar";
+      const content = document.createElement("p");
+      content.textContent = message.content;
+      article.append(role, content);
+      log.appendChild(article);
+    });
+  }
+  byId("clearSidecarButton").disabled = !state.sidecarHistory.length;
+  log.scrollTop = log.scrollHeight;
+}
+
+function boundedSidecarHistory() {
+  const bounded = [];
+  let total = 0;
+  for (const message of state.sidecarHistory.slice().reverse()) {
+    if (bounded.length >= 12) break;
+    const content = String(message.content || "").slice(0, 4000);
+    if (!content || total + content.length > 24000) continue;
+    bounded.unshift({ role: message.role, content });
+    total += content.length;
+  }
+  return bounded;
+}
+
+function renderCitationList(id, values, emptyLabel) {
+  const list = byId(id);
+  list.replaceChildren();
+  if (!values.length) {
+    const item = document.createElement("li");
+    item.textContent = emptyLabel;
+    list.appendChild(item);
+    return;
+  }
+  values.forEach((value) => {
+    const item = document.createElement("li");
+    const code = document.createElement("code");
+    code.textContent = String(value);
+    item.appendChild(code);
+    list.appendChild(item);
+  });
+}
+
+function renderSidecarProvenance(payload) {
+  byId("sidecarProvenance").hidden = false;
+  byId("sidecarContextHash").textContent = String(firstValue(payload.context_hash, "Unavailable"));
+  byId("sidecarModelVersion").textContent = String(firstValue(payload.model_version, "Unavailable"));
+  const citations = payload.citations || {};
+  renderCitationList("sidecarEventCitations", asArray(citations.event_ids), "No authorized event citations returned.");
+  renderCitationList("sidecarSourceCitations", asArray(citations.source_ids), "No authorized source citations returned.");
+}
+
+async function sendSidecarMessage(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const message = byId("sidecarInput").value.trim();
+  const cycleId = selectedFieldworkCycle();
+  const branchId = canonicalFieldworkBranchId();
+  if (!message || !cycleId || !branchId || !form.reportValidity()) return;
+  if (state.sidecarSelectionKey !== currentSidecarSelectionKey()) resetSidecarChat();
+  const requestHistory = boundedSidecarHistory();
+  state.sidecarHistory.push({ role: "user", content: message });
+  state.sidecarHistory = state.sidecarHistory.slice(-12);
+  renderSidecarHistory();
+  byId("sidecarInput").value = "";
+  byId("sidecarStatus").textContent = "Reading the authorized projection…";
+  byId("sidecarInput").disabled = true;
+  byId("sendSidecarButton").disabled = true;
+  byId("clearSidecarButton").disabled = true;
+  form.setAttribute("aria-busy", "true");
+  try {
+    const payload = await api.request(
+      `/api/records/${encodeURIComponent(recordId())}/sidecar/chat`,
+      {
+        method: "POST",
+        body: {
+          message,
+          history: requestHistory,
+          scale: byId("fieldworkScale").value,
+          cycle_id: cycleId,
+          branch_id: branchId
+        }
+      }
+    );
+    if (payload.persisted !== false || payload.canonical_effect !== false || payload.record_write_authority !== false) {
+      throw new Error("The informational sidecar boundary could not be verified.");
+    }
+    state.sidecarHistory.push({ role: "assistant", content: String(payload.answer) });
+    state.sidecarHistory = state.sidecarHistory.slice(-12);
+    renderSidecarHistory();
+    renderSidecarProvenance(payload);
+    byId("sidecarStatus").textContent = "Ephemeral answer received. Nothing was added to the record.";
+  } catch (error) {
+    byId("sidecarStatus").textContent = error.message;
+  } finally {
+    form.setAttribute("aria-busy", "false");
+    renderSidecarSelection();
+    byId("sidecarInput").focus();
+  }
+}
+
+function renderEvolutionConsent() {
+  const enabled = state.evolutionCollectionEnabled;
+  const granted = state.evolutionConsent === "granted";
+  const checkbox = byId("evolutionConsent");
+  checkbox.disabled = !enabled;
+  checkbox.checked = granted;
+  byId("namePreference").hidden = !enabled || !granted;
+  byId("evolutionConsentHelp").textContent = !enabled
+    ? "Bounded product signals are disabled for this deployment."
+    : granted
+      ? "Opted in. You can withdraw at any time; content collection remains off."
+      : state.evolutionConsent === "withdrawn"
+        ? "Opted out. No product-improvement signals will be accepted."
+        : "Not opted in. No product-improvement signals will be accepted.";
+  document.querySelectorAll("[data-evolution-signal]").forEach((button) => {
+    button.disabled = !enabled || !granted;
+    button.setAttribute("aria-pressed", button.dataset.evolutionSignal === state.namePreference ? "true" : "false");
+  });
+}
+
+async function loadProductEvolutionConsent() {
+  try {
+    const payload = await api.request("/api/product-evolution/consent");
+    state.evolutionCollectionEnabled = Boolean(payload.collection_enabled);
+    state.evolutionConsent = String(firstValue(payload.consent, "not_set"));
+    byId("evolutionStatus").textContent = "";
+  } catch (error) {
+    state.evolutionCollectionEnabled = false;
+    state.evolutionConsent = "not_set";
+    byId("evolutionStatus").textContent = error.message;
+  }
+  renderEvolutionConsent();
+}
+
+async function updateProductEvolutionConsent() {
+  const checkbox = byId("evolutionConsent");
+  const enabled = checkbox.checked;
+  checkbox.disabled = true;
+  byId("evolutionStatus").textContent = enabled ? "Recording opt-in…" : "Recording opt-out…";
+  try {
+    const payload = await api.request("/api/product-evolution/consent", {
+      method: "POST",
+      body: { enabled }
+    });
+    state.evolutionCollectionEnabled = Boolean(payload.collection_enabled);
+    state.evolutionConsent = String(firstValue(payload.consent, enabled ? "granted" : "withdrawn"));
+    byId("evolutionStatus").textContent = enabled
+      ? "Opted in to bounded categorical signals. Content collection remains off."
+      : "Opted out. No further product-improvement signals will be sent.";
+  } catch (error) {
+    byId("evolutionStatus").textContent = error.message;
+    await loadProductEvolutionConsent();
+  }
+  renderEvolutionConsent();
+}
+
+async function sendProductSignal(signal, dimensions = {}) {
+  if (!state.evolutionCollectionEnabled || state.evolutionConsent !== "granted") return false;
+  const allowedSignals = new Set([
+    "pathway.negotiate_selected",
+    "pathway.non_ai_selected",
+    "pathway.walk_away_selected",
+    "fieldwork.replay_used",
+    "name.preference.fieldwork_loop",
+    "name.preference.current_toolkit"
+  ]);
+  if (!allowedSignals.has(signal)) return false;
+  const idempotencyKey = makeRequestId();
+  const body = { signal, idempotency_key: idempotencyKey };
+  ["pathway_stage", "route", "scale"].forEach((key) => {
+    const value = dimensions[key];
+    if (typeof value === "string" && /^[a-z0-9][a-z0-9._:-]{0,79}$/.test(value)) body[key] = value;
+  });
+  try {
+    const payload = await api.request("/api/product-evolution/signals", {
+      method: "POST",
+      body,
+      idempotent: true,
+      idempotencyKey
+    });
+    return payload.accepted === true;
+  } catch (error) {
+    if (![403, 404].includes(error.status)) return false;
+    return false;
+  }
+}
+
+async function recordNamePreference(button) {
+  const signal = String(button.dataset.evolutionSignal || "");
+  document.querySelectorAll("[data-evolution-signal]").forEach((item) => { item.disabled = true; });
+  byId("evolutionStatus").textContent = "Recording the categorical name preference…";
+  const accepted = await sendProductSignal(signal);
+  if (accepted) {
+    state.namePreference = signal;
+    byId("evolutionStatus").textContent = "Name preference recorded without content or identifying details.";
+  } else {
+    byId("evolutionStatus").textContent = "The preference was not recorded; the toolkit remains fully usable.";
+  }
+  renderEvolutionConsent();
+}
+
+function setFieldworkStatus(message, success = false) {
+  const element = byId("fieldworkStatus");
+  element.textContent = message || "";
+  element.classList.toggle("is-success", Boolean(success));
+}
+
+function setFieldworkEnabled(enabled) {
+  [
+    "fieldworkCycleSelect",
+    "fieldworkEntryType",
+    "fieldworkObservedAt",
+    "fieldworkEntryContent",
+    "appendFieldworkButton",
+    "fieldworkScale",
+    "fieldworkAsOf",
+    "replayFieldworkButton"
+  ].forEach((id) => {
+    byId(id).disabled = !enabled;
+  });
+}
+
+function renderFieldworkCycles(preferredCycleId = "") {
+  const select = byId("fieldworkCycleSelect");
+  const previous = preferredCycleId || select.value;
+  select.replaceChildren();
+  if (!state.fieldworkCycles.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Create a cycle to begin";
+    select.appendChild(option);
+    setFieldworkEnabled(false);
+    resetSidecarChat();
+    return;
+  }
+  state.fieldworkCycles.forEach((cycle) => {
+    const option = document.createElement("option");
+    option.value = String(cycle.cycle_id);
+    option.textContent = String(firstValue(cycle.label, cycle.cycle_id));
+    select.appendChild(option);
+  });
+  const chosen = state.fieldworkCycles.some((cycle) => String(cycle.cycle_id) === previous)
+    ? previous
+    : String(state.fieldworkCycles[state.fieldworkCycles.length - 1].cycle_id);
+  select.value = chosen;
+  setFieldworkEnabled(true);
+  if (state.sidecarSelectionKey && state.sidecarSelectionKey !== currentSidecarSelectionKey()) {
+    resetSidecarChat("The ephemeral chat was cleared because the selected cycle changed.");
+  } else {
+    state.sidecarSelectionKey = currentSidecarSelectionKey();
+    renderSidecarSelection();
+  }
+}
+
+async function loadFieldworkCycles(preferredCycleId = "") {
+  if (!recordId()) return;
+  setFieldworkStatus("Loading fieldwork cycles…");
+  try {
+    const payload = await api.request(`/api/records/${encodeURIComponent(recordId())}/fieldwork/cycles`);
+    state.fieldworkCycles = asArray(payload.cycles);
+    renderFieldworkCycles(preferredCycleId);
+    setFieldworkStatus("");
+    if (selectedFieldworkCycle()) await loadFieldworkReplay();
+    else renderFieldworkReplay(null);
+  } catch (error) {
+    setFieldworkStatus(error.message);
+    state.fieldworkCycles = [];
+    renderFieldworkCycles();
+  }
+}
+
+async function openFieldwork() {
+  if (!state.record) return;
+  state.currentView = "fieldwork";
+  byId("recordHome").hidden = true;
+  byId("conversationStage").hidden = true;
+  byId("synthesisStage").hidden = true;
+  byId("pathwayDestination").hidden = true;
+  byId("fieldworkStage").hidden = false;
+  byId("mobileStageTitle").textContent = "Fieldwork cycles";
+  byId("fieldworkObservedAt").value = localDateTimeValue();
+  byId("fieldworkObservedAt").max = localDateTimeValue();
+  if (state.sidecarRecordId !== recordId()) {
+    state.sidecarRecordId = recordId();
+    resetSidecarChat();
+  }
+  closeMobileSidebar();
+  renderNavigation();
+  renderPathwayPanel();
+  window.scrollTo({ top: 0 });
+  await loadFieldworkCycles(selectedFieldworkCycle());
+  await loadProductEvolutionConsent();
+}
+
+async function createFieldworkCycle(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const label = byId("fieldworkCycleLabel").value.trim();
+  if (!label || !form.reportValidity()) return;
+  const now = new Date().toISOString();
+  setFormBusy(form, true);
+  setFieldworkStatus("Opening the cycle…");
+  try {
+    const payload = await api.request(
+      `/api/records/${encodeURIComponent(recordId())}/fieldwork/cycles`,
+      {
+        method: "POST",
+        body: { label, observed_at: now, recorded_at: now }
+      }
+    );
+    const cycle = payload.cycle;
+    byId("fieldworkCycleLabel").value = "";
+    await loadFieldworkCycles(String(cycle.cycle_id));
+    setFieldworkStatus("Cycle opened. New entries will be appended to its canonical branch.", true);
+    byId("fieldworkEntryContent").focus();
+  } catch (error) {
+    setFieldworkStatus(error.message);
+  } finally {
+    setFormBusy(form, false);
+  }
+}
+
+async function appendFieldworkEntry(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const cycleId = selectedFieldworkCycle();
+  const entryType = String(byId("fieldworkEntryType").value);
+  const content = byId("fieldworkEntryContent").value.trim();
+  if (!cycleId || !content || !form.reportValidity()) return;
+  const idempotencyKey = makeRequestId();
+  setFormBusy(form, true);
+  setFieldworkStatus("Appending the fieldnote…");
+  try {
+    const observedAt = observedAtIso();
+    const recordedAt = new Date().toISOString();
+    await api.request(
+      `/api/records/${encodeURIComponent(recordId())}/fieldwork/cycles/${encodeURIComponent(cycleId)}/${encodeURIComponent(entryType)}`,
+      {
+        method: "POST",
+        body: {
+          content,
+          observed_at: observedAt,
+          recorded_at: recordedAt,
+          idempotency_key: idempotencyKey,
+          branch_id: null,
+          causal_event_ids: [],
+          source_refs: [],
+          sensitivity: "internal",
+          allowed_scales: [byId("fieldworkScale").value],
+          consent_basis: "not_required",
+          consent_subjects: [],
+          authorization_tags: [],
+          scope_node_ids: []
+        },
+        idempotent: true,
+        idempotencyKey
+      }
+    );
+    byId("fieldworkEntryContent").value = "";
+    byId("fieldworkObservedAt").value = localDateTimeValue();
+    await loadFieldworkReplay({ asOf: "" });
+    setFieldworkStatus("Fieldnote appended. Earlier entries were not changed.", true);
+  } catch (error) {
+    setFieldworkStatus(error.message);
+  } finally {
+    setFormBusy(form, false);
+    setFieldworkEnabled(Boolean(selectedFieldworkCycle()));
+  }
+}
+
+function fieldworkEventTitle(event) {
+  const entryType = event && event.payload && event.payload.entry_type;
+  if (entryType) return String(entryType).replaceAll("_", " ");
+  return String(firstValue(event && event.kind, "event")).replaceAll("_", " ");
+}
+
+function fieldworkEventCopy(event) {
+  if (event.redacted) return "Content is redacted under the current consent and authorization policy.";
+  const payload = event.payload || {};
+  return String(firstValue(payload.content, payload.label, payload.reason, payload.title, "Recorded in the append-only ledger."));
+}
+
+function updateFieldworkAsOfOptions(events, selected = "") {
+  const select = byId("fieldworkAsOf");
+  select.replaceChildren();
+  const latest = document.createElement("option");
+  latest.value = "";
+  latest.textContent = "Latest canonical state";
+  select.appendChild(latest);
+  events.forEach((event, index) => {
+    const option = document.createElement("option");
+    option.value = String(event.event_id);
+    option.textContent = `${index + 1}. ${fieldworkEventTitle(event)}`;
+    select.appendChild(option);
+  });
+  if (selected && events.some((event) => String(event.event_id) === selected)) select.value = selected;
+}
+
+function renderFieldworkReplay(payload) {
+  state.fieldworkReplay = payload;
+  const timeline = byId("fieldworkTimeline");
+  const outputList = byId("fieldworkOutputList");
+  timeline.replaceChildren();
+  outputList.replaceChildren();
+  if (!payload || !payload.projection) {
+    byId("fieldworkEmptyState").hidden = false;
+    byId("fieldworkOutputs").hidden = true;
+    byId("fieldworkStateHash").textContent = "No replay yet";
+    byId("fieldworkReplayBadge").textContent = "Stored exact projection";
+    renderSidecarSelection();
+    return;
+  }
+  const projection = payload.projection;
+  const events = asArray(projection.events);
+  const branchMode = String(firstValue(projection.branch && projection.branch.mode, "canonical"));
+  byId("fieldworkEmptyState").hidden = Boolean(events.length);
+  byId("fieldworkReplayBadge").textContent = branchMode === "counterfactual"
+    ? "Counterfactual · simulation only"
+    : "Stored exact projection";
+  byId("fieldworkReplayExplainer").textContent = branchMode === "counterfactual"
+    ? "This is a counterfactual simulation. Its events have no canonical effect and cannot overwrite the stored fieldwork record."
+    : "This replay is a deterministic projection of stored, authorized ledger events. It does not regenerate model language.";
+  const stateHash = String(firstValue(payload.state_hash, ""));
+  byId("fieldworkStateHash").textContent = stateHash ? `state ${stateHash.slice(0, 12)}` : "State hash unavailable";
+  byId("fieldworkStateHash").title = stateHash;
+  events.forEach((event) => {
+    const item = document.createElement("li");
+    item.className = `fieldwork-event${event.redacted ? " is-redacted" : ""}`;
+    const meta = document.createElement("div");
+    meta.className = "fieldwork-event-meta";
+    const layer = document.createElement("span");
+    layer.textContent = String(firstValue(event.epistemic_layer, "record")).replaceAll("_", " ");
+    const chronology = event.chronology || {};
+    const time = document.createElement("time");
+    const observed = new Date(firstValue(chronology.observed_at, chronology.committed_at, ""));
+    time.textContent = Number.isNaN(observed.getTime()) ? "Time unavailable" : observed.toLocaleString();
+    meta.append(layer, time);
+    const heading = document.createElement("h3");
+    heading.textContent = fieldworkEventTitle(event);
+    const copy = document.createElement("p");
+    copy.textContent = fieldworkEventCopy(event);
+    const provenance = document.createElement("small");
+    provenance.textContent = `${event.canonical_effect ? "canonical" : "simulation only"} · event ${String(event.event_id).slice(0, 16)} · ${firstValue(event.actor && event.actor.actor_role, "actor")}`;
+    item.append(meta, heading, copy, provenance);
+    timeline.appendChild(item);
+  });
+  const outputs = asArray(projection.outputs);
+  byId("fieldworkOutputs").hidden = !outputs.length;
+  outputs.forEach((output) => {
+    const item = document.createElement("li");
+    const name = document.createElement("strong");
+    name.textContent = String(firstValue(output.output_id, "Stored output"));
+    const detail = document.createElement("small");
+    detail.textContent = `Exact stored replay · ${firstValue(output.generator, "generator version unknown")} · hash ${String(firstValue(output.stored_output_hash, "")).slice(0, 12)}`;
+    item.append(name, detail);
+    outputList.appendChild(item);
+  });
+  renderSidecarSelection();
+}
+
+async function loadFieldworkReplay(options = {}) {
+  const cycleId = selectedFieldworkCycle();
+  if (!cycleId) {
+    renderFieldworkReplay(null);
+    return false;
+  }
+  const asOf = options.asOf !== undefined ? String(options.asOf) : String(byId("fieldworkAsOf").value || "");
+  const params = new URLSearchParams({ scale: byId("fieldworkScale").value });
+  if (asOf) params.set("as_of_event_id", asOf);
+  setFieldworkStatus("Replaying the authorized ledger projection…");
+  byId("fieldworkReplayForm").setAttribute("aria-busy", "true");
+  try {
+    const payload = await api.request(
+      `/api/records/${encodeURIComponent(recordId())}/fieldwork/cycles/${encodeURIComponent(cycleId)}/replay?${params}`
+    );
+    renderFieldworkReplay(payload);
+    const returnedEvents = asArray(payload.projection && payload.projection.events);
+    if (!asOf || !state.fieldworkEventOptions.length) state.fieldworkEventOptions = returnedEvents;
+    updateFieldworkAsOfOptions(state.fieldworkEventOptions, asOf);
+    setFieldworkStatus(
+      asOf ? "Historical projection replayed under current consent policy." : "Latest canonical projection replayed.",
+      true
+    );
+    return true;
+  } catch (error) {
+    setFieldworkStatus(error.message);
+    return false;
+  } finally {
+    byId("fieldworkReplayForm").setAttribute("aria-busy", "false");
+  }
+}
+
+async function handleFieldworkReplay(event) {
+  event.preventDefault();
+  const replayed = await loadFieldworkReplay();
+  if (replayed) {
+    void sendProductSignal("fieldwork.replay_used", { scale: byId("fieldworkScale").value });
   }
 }
 
@@ -999,6 +2458,7 @@ async function generateSynthesis(regenerate) {
       : payload;
     state.annotations = {};
     renderSynthesis();
+    await loadPathway(false);
     showToast(regenerate ? "The synthesis map has been regenerated." : "The synthesis is ready.");
   } catch (error) {
     byId("mapEmpty").hidden = false;
@@ -1315,7 +2775,7 @@ async function saveAnnotation(event) {
 function renderResponseDrawer() {
   const container = byId("responseList");
   container.replaceChildren();
-  STAGES.slice(0, 7).forEach((definition, index) => {
+  STAGES.slice(0, reviewStageCount()).forEach((definition, index) => {
     const turns = recordTurns(index).map(normalizeTurn).filter((turn) => turn.content);
     const section = document.createElement("section");
     section.className = "response-stage";
@@ -1442,6 +2902,12 @@ function initEventHandlers() {
         showRecordHome();
       }
       if (action === "logout") await logout();
+      if (action === "open-fieldwork") await openFieldwork();
+      if (action === "focus-pathway") {
+        closeMobileSidebar();
+        byId("pathwayPanel").scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+        byId("pathwayPanel").focus({ preventScroll: true });
+      }
       if (action === "review-responses") renderResponseDrawer();
       if (action === "close-responses") byId("responseDrawer").hidden = true;
       if (action === "regenerate-map") await generateSynthesis(Boolean(state.synthesis));
@@ -1454,6 +2920,10 @@ function initEventHandlers() {
 
     const recordButton = event.target.closest("[data-record-id]");
     if (recordButton) await resumeRecord(recordButton.dataset.recordId);
+    const evolutionButton = event.target.closest("[data-evolution-signal]");
+    if (evolutionButton && !evolutionButton.disabled) await recordNamePreference(evolutionButton);
+    const routeActionButton = event.target.closest("[data-route-action]");
+    if (routeActionButton && !routeActionButton.disabled) await handleRouteAction(routeActionButton);
     const stageButton = event.target.closest("[data-stage-index]");
     if (stageButton && !stageButton.disabled) await selectStage(Number(stageButton.dataset.stageIndex), false);
     const analysisButton = event.target.closest("[data-analysis-key]");
@@ -1485,6 +2955,37 @@ function initEventHandlers() {
   byId("recordForm").addEventListener("submit", createRecord);
   byId("messageForm").addEventListener("submit", sendStageMessage);
   byId("completeStageButton").addEventListener("click", completeCurrentStage);
+  byId("pathwayDecisionForm").addEventListener("submit", handlePathwayDecision);
+  byId("fieldworkCycleForm").addEventListener("submit", createFieldworkCycle);
+  byId("fieldworkEntryForm").addEventListener("submit", appendFieldworkEntry);
+  byId("fieldworkReplayForm").addEventListener("submit", handleFieldworkReplay);
+  byId("sidecarForm").addEventListener("submit", sendSidecarMessage);
+  byId("clearSidecarButton").addEventListener("click", () => resetSidecarChat("Ephemeral chat cleared."));
+  byId("evolutionConsent").addEventListener("change", updateProductEvolutionConsent);
+  byId("refreshFieldworkButton").addEventListener("click", () => loadFieldworkCycles(selectedFieldworkCycle()));
+  byId("fieldworkCycleSelect").addEventListener("change", async () => {
+    state.fieldworkEventOptions = [];
+    byId("fieldworkAsOf").value = "";
+    resetSidecarChat("The ephemeral chat was cleared because the selected cycle changed.");
+    await loadFieldworkReplay({ asOf: "" });
+  });
+  byId("fieldworkAsOf").addEventListener("change", () => loadFieldworkReplay());
+  byId("fieldworkScale").addEventListener("change", async () => {
+    resetSidecarChat("The ephemeral chat was cleared because the selected scale changed.");
+    await loadFieldworkReplay();
+  });
+  byId("cancelPathwayDecisionButton").addEventListener("click", () => {
+    state.pendingPathwayDecision = null;
+    byId("pathwayConfirmDialog").close();
+    byId("pathwayRationale").focus();
+  });
+  byId("confirmPathwayDecisionButton").addEventListener("click", async () => {
+    const pending = state.pendingPathwayDecision;
+    if (!pending) return;
+    byId("pathwayConfirmDialog").close();
+    state.pendingPathwayDecision = null;
+    await executePathwayDecision(pending.outcome, pending.rationale);
+  });
   byId("annotationForm").addEventListener("submit", saveAnnotation);
   byId("annotationText").addEventListener("input", updateAnnotationCount);
   byId("mapNodeSelect").addEventListener("change", (event) => selectNode(event.target.value));
@@ -1494,12 +2995,20 @@ function initEventHandlers() {
   byId("recordsDialog").addEventListener("click", (event) => {
     if (event.target === byId("recordsDialog")) byId("recordsDialog").close();
   });
+  byId("pathwayConfirmDialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    state.pendingPathwayDecision = null;
+    byId("pathwayConfirmDialog").close();
+    byId("pathwayRationale").focus();
+  });
 }
 
 async function init() {
   initEventHandlers();
   initReviewJump();
   const fragment = readLinkFragment();
+  await loadProductIdentity();
+  await loadStageDefinitions();
   try {
     await refreshSession();
   } catch (error) {

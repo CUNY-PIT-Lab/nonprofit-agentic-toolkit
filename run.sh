@@ -16,7 +16,22 @@ export PUBLIC_APP_URL="${PUBLIC_APP_URL:-$URL}"
 export EMAIL_BACKEND="${EMAIL_BACKEND:-memory}"
 export AUTH_PEPPER="${AUTH_PEPPER:-local-development-only-pepper-change-before-production}"
 
-command -v python3 >/dev/null || { echo "python3 not found — install it and re-run." >&2; exit 1; }
+if [[ -n "${TOOLKIT_PYTHON_BIN:-}" ]]; then
+  PYTHON_BIN="$TOOLKIT_PYTHON_BIN"
+elif [[ -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
+
+command -v "$PYTHON_BIN" >/dev/null || {
+  echo "Python not found at ${PYTHON_BIN} — install Python 3.12 or set TOOLKIT_PYTHON_BIN." >&2
+  exit 1
+}
+"$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || {
+  echo "Python 3.11 or newer is required; Python 3.12 is pinned in .python-version." >&2
+  exit 1
+}
 
 # Run a deterministic local adapter when no model key is present. Production
 # rejects this adapter in backend/config.py.
@@ -28,7 +43,7 @@ fi
 
 # 1. key-free test mode
 if [[ "${1:-}" == "test" ]]; then
-  python3 -m unittest discover -s tests -p 'test_*.py' "${@:2}"
+  "$PYTHON_BIN" -m unittest discover -s tests -p 'test_*.py' "${@:2}"
   exit $?
 fi
 
@@ -41,7 +56,7 @@ fi
 
 # 3. start the server; always stop it again on exit
 echo "starting on ${URL}  (model backend ${MODEL_BACKEND})"
-python3 server.py &
+"$PYTHON_BIN" server.py &
 SERVER_PID=$!
 trap 'kill "${SERVER_PID}" 2>/dev/null || true' EXIT
 
