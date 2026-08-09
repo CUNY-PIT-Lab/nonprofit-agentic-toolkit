@@ -114,6 +114,21 @@ class LandingInterface(unittest.TestCase):
         self.assertNotIn("box-shadow", CSS)
         self.assertIn("--sans:", CSS)
 
+    def test_account_actions_are_compact_wrappable_tap_targets(self):
+        start = INDEX.index('class="entry-actions"')
+        entry_actions = INDEX[start : INDEX.index('class="microcopy"', start)]
+        self.assertIn('class="entry-action-buttons"', entry_actions)
+        self.assertNotIn("button-wide", entry_actions)
+        self.assertRegex(
+            CSS,
+            r"\.entry-action-buttons\s*\{[^}]*display:\s*flex;"
+            r"[^}]*flex-wrap:\s*wrap;[^}]*\}",
+        )
+        self.assertRegex(
+            CSS,
+            r"\.entry-action-buttons \.button\s*\{[^}]*min-height:\s*44px;[^}]*\}",
+        )
+
 
 class AccountInterface(unittest.TestCase):
     def test_verified_account_flow_is_present(self):
