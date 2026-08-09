@@ -163,8 +163,9 @@ h1, h2, h3 { letter-spacing: -.02em; }
 }
 .entry-actions h2 { margin: 0; font-size: 16px; }
 .entry-actions > p { margin: 8px 0 16px; color: var(--text); font-size: 12px; }
-.entry-actions .button + .button { margin-top: 8px; }
-.entry-actions .microcopy { margin: 15px 0 0; color: var(--muted); font-size: 10.5px; text-align: center; }
+.entry-action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.entry-action-buttons .button { min-height: 44px; }
+.entry-actions .microcopy { margin: 15px 0 0; color: var(--muted); font-size: 10.5px; }
 .review-jump {
   position: fixed;
   left: 50%;

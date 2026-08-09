@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="A guided review for nonprofit organizations deciding whether and how to use AI.">
   <title>Nonprofit AI toolkit</title>
-  <link rel="stylesheet" href="static/app.css?v=20260808-fieldwork-replay3">
+  <link rel="stylesheet" href="static/app.css?v=20260809-compact-entry-actions">
   <script src="static/vendor/cytoscape.min.js?v=3.34.0" defer></script>
   <script src="static/app.js?v=20260808-fieldwork-replay3" defer></script>
 </head>
@@ -44,8 +44,10 @@
         <div class="entry-actions" aria-labelledby="entryActionsTitle">
           <h2 id="entryActionsTitle">Begin the guided review</h2>
           <p>Sign in or create a verified account to save your work, return to a review, and annotate its concept map.</p>
-          <button class="button button-wide" type="button" data-action="start-review">Sign in</button>
-          <button class="button button-secondary button-wide" type="button" data-auth-open="register">Create an account</button>
+          <div class="entry-action-buttons">
+            <button class="button" type="button" data-action="start-review">Sign in</button>
+            <button class="button button-secondary" type="button" data-auth-open="register">Create an account</button>
+          </div>
           <p class="microcopy">We will send a verification email before the toolkit opens.</p>
         </div>
         <button class="review-jump" id="reviewJump" type="button" aria-controls="review" aria-label="Go to review the steps">
