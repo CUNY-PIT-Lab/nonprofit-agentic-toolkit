@@ -8,6 +8,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Local development may keep ignored credentials in .env. Tests deliberately
+# skip it so their key-free environment remains deterministic.
+if [[ "${1:-}" != "test" && -f ".env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source ".env"
+  set +a
+fi
+
 PORT="${PORT:-8765}"
 URL="http://127.0.0.1:${PORT}"
 export PORT
