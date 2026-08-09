@@ -12,6 +12,7 @@ from .models import Base, new_telemetry_scope_id
 # modules do not import this database module, so these imports are cycle-safe.
 from . import fieldwork_store as _fieldwork_store  # noqa: F401,E402
 from . import evolution_store as _evolution_store  # noqa: F401,E402
+from . import evaluation_store as _evaluation_store  # noqa: F401,E402
 from . import pathway_store as _pathway_store  # noqa: F401,E402
 
 
@@ -33,6 +34,8 @@ NUMBERED_MIGRATION_TABLES = frozenset(
         "evolution_reviews",
         "evolution_rollout_actions",
         "evolution_evaluations",
+        "evaluation_buckets",
+        "conversation_evaluation_events",
     }
 )
 
@@ -446,3 +449,12 @@ def run_safe_migrations(engine, *, create_numbered_tables: bool = True) -> None:
                 ),
                 {"version": "007_guided_stage_cycles"},
             )
+            if create_numbered_tables:
+                conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO schema_migrations "
+                        "(version, applied_at) "
+                        "VALUES (:version, CURRENT_TIMESTAMP)"
+                    ),
+                    {"version": "009_conversation_evaluation"},
+                )

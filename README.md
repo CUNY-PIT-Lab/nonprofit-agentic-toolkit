@@ -34,7 +34,7 @@ Each new or pathway-initialized adoption record is pinned to an immutable pathwa
 
 The backend also provides append-only ethnographic fieldwork cycles. Observations, participant accounts, reflexive and positionality memos, member checks, interpretations, decisions, interventions, and after-effects retain actor, chronology, source, consent, scale, and software-version provenance. Authorized clients can replay an exact stored output, derive a deterministic projection at a selected scale and event boundary, or fork a historical or explicitly counterfactual branch without changing canonical history. Derived outputs inherit every direct and nested input restriction, so withdrawal or later authorization loss also redacts their projection and exact replay.
 
-The browser includes pathway decisions; a bounded fieldwork workspace for cycles, observations, reflexive and positionality memos, and canonical replay; an ephemeral informational sidecar; and voluntary product-signal consent and name preference controls. The HTTP API carries the advanced fieldwork operations. The sidecar answers from an authorized cycle without writing or persisting its answer. Separately, the opt-in product-evolution API stores only allowlisted categorical and numeric signals with idempotent retry keys. The manual `python -m backend.evolve` command can turn a consent-filtered, small-cell-suppressed aggregate into deterministic, inert interface, pathway, or display-name proposals; the domain also supports prompt proposals. Human review, rollout/rollback records, evaluation, and a public current-identity resolver are implemented. Only an explicit governed rollout activates a proposed name. The browser reads the resolver at boot to update its document title and product-name labels. Applying or deploying other proposal types remains an external release step. See [Dynamic evolution and replay](docs/DYNAMIC_EVOLUTION_AND_REPLAY.md) for the exact boundary and [Railway beta operations](docs/RAILWAY_BETA_OPERATIONS.md) for staged deployment, telemetry, retention, and rollback.
+The browser includes pathway decisions; a bounded fieldwork workspace for cycles, observations, reflexive and positionality memos, and canonical replay; an ephemeral informational sidecar; voluntary product-signal consent and name preference controls; and a protected conversation-evaluation board for organization owners and reviewers. The evaluation board classifies saved guided-stage passes, stores reviewer-private notes and turn annotations in a replayable ledger, and never changes the adoption record, pathway, fieldwork evidence, sidecar, or telemetry. The HTTP API carries the advanced fieldwork operations. The sidecar answers from an authorized cycle without writing or persisting its answer. Separately, the opt-in product-evolution API stores only allowlisted categorical and numeric signals with idempotent retry keys. The manual `python -m backend.evolve` command can turn a consent-filtered, small-cell-suppressed aggregate into deterministic, inert interface, pathway, or display-name proposals; the domain also supports prompt proposals. Human review, rollout/rollback records, evaluation, and a public current-identity resolver are implemented. Only an explicit governed rollout activates a proposed name. The browser reads the resolver at boot to update its document title and product-name labels. Applying or deploying other proposal types remains an external release step. See [Conversation evaluation workspace](docs/EVALUATION_WORKSPACE.md), [Dynamic evolution and replay](docs/DYNAMIC_EVOLUTION_AND_REPLAY.md), and [Railway beta operations](docs/RAILWAY_BETA_OPERATIONS.md) for the exact boundaries.
 
 ## Saved work
 
@@ -44,6 +44,7 @@ PostgreSQL stores:
 - adoption records, stage conversations, and completed steps
 - immutable pathway definitions, confirmed facts, approvals, and transition journals
 - append-only fieldwork cycles, branches, scope graphs, consent events, and stored outputs
+- reviewer-private, hash-chained conversation placements, notes, and turn annotations
 - hash-chained product signals, signal-consent decisions, evolution proposals, human reviews, rollout/rollback records, and evaluations
 - model runs and response-based knowledge snippets
 - synthesis and concept-map versions
@@ -84,7 +85,7 @@ The tool produces stable, annotatable node and edge identifiers that the web int
 
 Railway runs FastAPI and PostgreSQL on the same private project network. The app serves its interface and API from one HTTPS origin.
 
-Before each deployment, Railway runs `python -m backend.migrate`. The forward-only runner applies the checked-in PostgreSQL fieldwork, pathway, and governed-evolution migrations once, then Railway gates traffic on `/health`. The sidecar is currently a route in this web service, not a separate Railway service. No cron service, Railway feature flag, or third-party observability integration is configured by this repository.
+Before each deployment, Railway runs `python -m backend.migrate`. The forward-only runner applies the checked-in PostgreSQL fieldwork, pathway, governed-evolution, and conversation-evaluation migrations once, then Railway gates traffic on `/health`. The sidecar is currently a route in this web service, not a separate Railway service. No cron service, Railway feature flag, or third-party observability integration is configured by this repository.
 
 Required variables:
 
@@ -104,6 +105,11 @@ Optional governed product-signal settings:
 - `PRODUCT_TELEMETRY_ENABLED=false`
 - `TELEMETRY_COHORT=beta`
 - `TELEMETRY_MIN_CELL_SIZE=3`
+
+Optional conversation-evaluation settings:
+
+- `TOOLKIT_EVALUATION_ENABLED=false`
+- `TOOLKIT_EVALUATION_MIN_INACTIVE_SECONDS=300`
 
 Production startup stops when PostgreSQL, HTTPS, the authentication pepper, or the live model adapter is missing. Registration returns `503` until email delivery is ready. `/health` checks the database connection and reports whether account email is configured.
 

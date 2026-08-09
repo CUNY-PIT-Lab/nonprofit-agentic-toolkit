@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session as OrmSession
 
 from .config import Settings
 from .database import build_database, run_safe_migrations
+from .evaluation_api import create_evaluation_router
+from .evaluation_store import EvaluationStore
 from .evolution_api import create_evolution_router
 from .evolution_store import EvolutionStore
 from .fieldwork import (
@@ -1349,6 +1351,46 @@ def create_app(
             )
         )
 
+    def evaluation_reviewer_organizations(
+        dbs: OrmSession, user_id: str
+    ) -> list[Organization]:
+        return list(
+            dbs.scalars(
+                select(Organization)
+                .join(
+                    OrganizationMembership,
+                    OrganizationMembership.organization_id == Organization.id,
+                )
+                .where(
+                    OrganizationMembership.user_id == user_id,
+                    OrganizationMembership.role.in_(("owner", "reviewer")),
+                )
+                .order_by(Organization.name, Organization.id)
+            ).all()
+        )
+
+    def evaluation_conversation_access(
+        dbs: OrmSession, user_id: str, stage_state_id: str
+    ) -> StageState:
+        state = dbs.scalar(
+            select(StageState)
+            .join(AdoptionRecord, AdoptionRecord.id == StageState.record_id)
+            .join(
+                OrganizationMembership,
+                OrganizationMembership.organization_id
+                == AdoptionRecord.organization_id,
+            )
+            .where(
+                StageState.id == stage_state_id,
+                OrganizationMembership.user_id == user_id,
+                OrganizationMembership.role.in_(("owner", "reviewer")),
+            )
+        )
+        if not state:
+            # Do not disclose whether the stage state exists in another org.
+            raise HTTPException(404, "Conversation not found")
+        return state
+
     def record_for_user(
         dbs: OrmSession, user_id: str, record_id: str
     ) -> AdoptionRecord:
@@ -2131,6 +2173,19 @@ def create_app(
         )
     )
     app.include_router(
+        create_evaluation_router(
+            db_dependency=db,
+            auth_dependency=auth,
+            require_csrf=require_origin_csrf,
+            reviewer_organizations=evaluation_reviewer_organizations,
+            conversation_access=evaluation_conversation_access,
+            audit=audit,
+            store_factory=lambda: EvaluationStore(session_factory),
+            enabled=settings.evaluation_enabled,
+            min_inactive_seconds=settings.evaluation_min_inactive_seconds,
+        )
+    )
+    app.include_router(
         create_evolution_router(
             db_dependency=db,
             auth_dependency=auth,
@@ -2153,6 +2208,8 @@ def create_app(
             "status": "ok",
             "auth_ready": settings.email_ready if settings.production else bool(email_backend),
             "database": "connected",
+            "evaluation_enabled": settings.evaluation_enabled,
+            "evaluation_min_inactive_seconds": settings.evaluation_min_inactive_seconds,
         }
 
     if (
@@ -3542,6 +3599,14 @@ def create_app(
         return Response(status_code=204)
 
     static_root = Path(__file__).resolve().parent.parent
+
+    @app.get("/evaluation", include_in_schema=False)
+    @app.get("/evaluation/", include_in_schema=False)
+    def evaluation_workspace():
+        return FileResponse(
+            static_root / "evaluation.html",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/")
     def index():
