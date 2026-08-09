@@ -81,6 +81,7 @@ jobs:
               "006_governed_evolution",
               "007_guided_stage_cycles",
               "008_stable_telemetry_scope",
+              "009_conversation_evaluation",
           }
           append_only_tables = {
               "fieldwork_projects",
@@ -98,6 +99,8 @@ jobs:
               "evolution_reviews",
               "evolution_rollout_actions",
               "evolution_evaluations",
+              "evaluation_buckets",
+              "conversation_evaluation_events",
           }
           required_constraints = {
               "ck_fieldwork_event_hashes",
@@ -112,6 +115,9 @@ jobs:
               "uq_stage_state",
               "uq_completed_stage",
               "uq_users_telemetry_scope_id",
+              "ck_conversation_evaluation_shape",
+              "uq_conversation_evaluation_version",
+              "uq_conversation_evaluation_operation",
           }
           with engine.connect() as connection:
               versions = set(
@@ -137,6 +143,7 @@ jobs:
                       "fieldwork_append_only",
                       "pathway_append_only",
                       "evolution_append_only",
+                      "evaluation_append_only",
                   }
               }
               assert append_only_tables <= guarded_tables, (
@@ -145,6 +152,10 @@ jobs:
               assert (
                   "fieldwork_events",
                   "fieldwork_event_branch_guard",
+              ) in trigger_rows
+              assert (
+                  "conversation_evaluation_events",
+                  "evaluation_event_identity_guard",
               ) in trigger_rows
               constraints = set(
                   connection.execute(

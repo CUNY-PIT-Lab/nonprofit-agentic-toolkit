@@ -33,6 +33,8 @@ class Settings:
     telemetry_enabled: bool
     telemetry_cohort: str
     telemetry_min_cell_size: int
+    evaluation_enabled: bool
+    evaluation_min_inactive_seconds: int
 
     @property
     def production(self) -> bool:
@@ -116,5 +118,20 @@ class Settings:
             telemetry_cohort=telemetry_cohort,
             telemetry_min_cell_size=max(
                 3, min(100, int(os.environ.get("TELEMETRY_MIN_CELL_SIZE", "3")))
+            ),
+            evaluation_enabled=_truthy(
+                os.environ.get("TOOLKIT_EVALUATION_ENABLED")
+            ),
+            evaluation_min_inactive_seconds=max(
+                0,
+                min(
+                    2_592_000,
+                    int(
+                        os.environ.get(
+                            "TOOLKIT_EVALUATION_MIN_INACTIVE_SECONDS",
+                            "300",
+                        )
+                    ),
+                ),
             ),
         )

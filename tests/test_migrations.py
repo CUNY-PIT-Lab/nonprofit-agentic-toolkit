@@ -25,6 +25,54 @@ from backend.models import (  # noqa: E402
 
 
 class MigrationBootstrapTests(unittest.TestCase):
+    def test_evaluation_tables_have_reviewer_scoped_replay_guards(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            engine, _sessions = build_database(
+                f"sqlite:///{temporary_directory}/evaluation.db"
+            )
+            try:
+                run_safe_migrations(engine)
+                inspector = inspect(engine)
+                tables = set(inspector.get_table_names())
+                event_uniques = {
+                    tuple(item.get("column_names") or ())
+                    for item in inspector.get_unique_constraints(
+                        "conversation_evaluation_events"
+                    )
+                }
+                event_checks = {
+                    item.get("name")
+                    for item in inspector.get_check_constraints(
+                        "conversation_evaluation_events"
+                    )
+                }
+                event_foreign_key_columns = {
+                    tuple(item.get("constrained_columns") or ())
+                    for item in inspector.get_foreign_keys(
+                        "conversation_evaluation_events"
+                    )
+                }
+                with engine.connect() as connection:
+                    versions = set(
+                        connection.execute(
+                            text("SELECT version FROM schema_migrations")
+                        ).scalars()
+                    )
+            finally:
+                engine.dispose()
+        self.assertIn("evaluation_buckets", tables)
+        self.assertIn("conversation_evaluation_events", tables)
+        self.assertIn(
+            ("stage_state_id", "reviewer_id", "evaluation_version"),
+            event_uniques,
+        )
+        self.assertIn(
+            ("stage_state_id", "reviewer_id", "operation_id"), event_uniques
+        )
+        self.assertIn("ck_conversation_evaluation_shape", event_checks)
+        self.assertNotIn(("turn_id",), event_foreign_key_columns)
+        self.assertIn("009_conversation_evaluation", versions)
+
     def test_postgres_bootstrap_mode_leaves_extension_tables_to_numbered_sql(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             engine, _sessions = build_database(
