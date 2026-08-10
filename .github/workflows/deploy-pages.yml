@@ -1,0 +1,33 @@
+name: Deploy static frontend to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p _pages
+          cp index.html _pages/
+          cp evaluation.html _pages/
+          cp -r static _pages/static
+          cp sw.js _pages/
+          touch _pages/.nojekyll
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: _pages
+          branch: gh-pages
+          clean: true
