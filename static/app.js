@@ -1,6 +1,6 @@
 "use strict";
 
-if (window.location.hostname === "zmuhls.github.io") {
+if (window.location.hostname.endsWith(".github.io")) {
   const canonical = "https://toolkit-api-production-535d.up.railway.app/";
   const safeFragment = /^(#(?:verify|reset)\?token=[A-Za-z0-9._~-]+)$/.test(window.location.hash)
     ? window.location.hash
