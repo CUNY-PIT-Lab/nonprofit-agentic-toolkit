@@ -318,12 +318,14 @@ A release cannot move to the next phase until all applicable gates pass.
 
 ## Rollback and recovery
 
+Use the [production incident runbook](PRODUCTION_INCIDENT_RUNBOOK.md) for the named decision maker and first-response procedures for model, email, migration, replay-integrity, consent-withdrawal, and identity-rollout incidents.
+
 Railway [rollback](https://docs.railway.com/deployments/deployment-actions) redeploys a previous successful image and restores that deployment’s custom variables. It does not reverse a database migration or erase data written by a newer application version.
 
 Use this order:
 
-1. Disable the affected runtime flag or sidecar route.
-2. Stop new writes for the affected capability if integrity is uncertain.
+1. Disable the affected runtime flag only if a tested runtime adapter exists; none is configured today. For a sidecar incident, use the production incident runbook's service/deployment containment decision instead of assuming a dashboard switch.
+2. Stop relying on affected results and stop new writes for the affected capability if integrity is uncertain. The current app has no generic record-write pause control.
 3. Capture deployment, app-version, pathway-version, and latest decision hashes.
 4. Roll back the web image to the last known good deployment.
 5. Verify `/health`, authentication, record load, pathway replay, and a consent-aware projection.
